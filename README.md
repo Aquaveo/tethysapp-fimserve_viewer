@@ -11,6 +11,8 @@ wraps [NOAA's flood inundation model (HAND-FIM)](https://github.com/NOAA-OWP/inu
 It runs on the [Tethys Platform](https://www.tethysplatform.org), which is a free, open-source
 framework for hydrology web apps.
 
+> **Deploying from a fresh clone?** See **[RUNBOOK.md](RUNBOOK.md)** (Python pin + AWS CLI checklist).
+
 > **In one sentence:** click watershed → pick date → see flood extent on a map.
 
 ---
