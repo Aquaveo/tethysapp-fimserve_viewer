@@ -1,0 +1,98 @@
+# FIMserve Viewer — Clean-environment runbook
+
+Use this checklist when installing from a **fresh git clone** on a machine that has
+never run the app before. It addresses the two most common first-install failures
+(Python version mismatch and missing AWS CLI).
+
+## Prerequisites
+
+- Miniforge or conda with **mamba**
+- **Git**
+- ~5 GB free disk, stable internet
+- macOS, Linux, or Windows 10/11
+
+## 1. Create the Tethys environment (Python pin is mandatory)
+
+```bash
+mamba create -n tethys-fimserve -c conda-forge \
+  "tethys-platform>=4.0" "postgresql" "python>=3.10,<3.13"
+conda activate tethys-fimserve
+python --version
+```
+
+Expected: `Python 3.10.x`, `3.11.x`, or `3.12.x`. **Do not use 3.13.**
+
+## 2. One-time portal database setup
+
+```bash
+tethys gen portal_config
+tethys db init
+tethys db start
+tethys db configure
+```
+
+## 3. Clone and install the app
+
+```bash
+git clone https://github.com/tasfia26/tethysapp-fimserve_viewer.git
+cd tethysapp-fimserve_viewer
+tethys install -d
+```
+
+`install.yml` installs conda/pip dependencies, **awscli**, and runs `post_install.py`
+(FIMserv from GitHub with `--no-deps`).
+
+## 4. Post-install verification
+
+```bash
+python --version
+aws --version
+tethys list | grep fimserve
+curl -s http://127.0.0.1:8001/apps/fimserve-viewer/api/health/   # after tethys start
+```
+
+If `aws --version` fails:
+
+```bash
+conda install -c conda-forge awscli
+```
+
+## 5. Start portal and smoke-test
+
+```bash
+tethys start -p 127.0.0.1:8001
+```
+
+Browser: <http://127.0.0.1:8001/apps/fimserve-viewer/>
+
+Test watershed: HUC8 `06010105`, date `2022-04-27`, time `12:00:00` → **Generate Flood Map**.
+
+First run per HUC8: **5–15 minutes** (HAND download from S3). Watch the terminal for
+Step 1/2/3 progress messages.
+
+## 6. Confirm Step 1 wrote HAND data
+
+After Step 1 completes, the app workspace should contain (paths vary by machine):
+
+```
+<FIMSERV_ROOT>/output/flood_<HUC8>/<HUC8>/branch_ids.csv
+<FIMSERV_ROOT>/output/flood_<HUC8>/<HUC8>/hydrotable.csv
+```
+
+Default `FIMSERV_ROOT` is the Tethys **app workspace** (outside the git repo).
+
+## External data (no credentials)
+
+| Step | Source | Auth |
+|------|--------|------|
+| 1 — HAND bundle | `s3://ciroh-owp-hand-fim/...` | Public (`--no-sign-request`) |
+| 2 — NWM retrospective | AWS Open Data via **teehr** | Public |
+
+## If install already failed once
+
+1. Remove the broken conda env and recreate with the Python pin (Section 1).
+2. Ensure `awscli` is present (`aws --version`).
+3. Re-run `tethys install -d` from the repo root.
+4. Restart `tethys start` after any change to Python code.
+
+See also **Troubleshooting** in [README.md](README.md).

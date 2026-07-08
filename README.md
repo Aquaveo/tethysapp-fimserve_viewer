@@ -65,6 +65,11 @@ You can also:
 - About 5 GB of free disk space.
 - A reasonably fast internet connection (the model data is big).
 - 30–60 minutes of patience the first time you set this up.
+- **Python 3.10, 3.11, or 3.12** in your Tethys conda env (**not 3.13** — see
+  [Troubleshooting](#troubleshooting) if install fails mid-way).
+- **AWS CLI** for Step 1 (HAND download from the public CIROH S3 bucket). It is
+  installed automatically via `install.yml`; verify with `aws --version` after
+  `tethys install -d`. No AWS account or credentials are required (`--no-sign-request`).
 
 ### Step 1 — Install conda (or mamba)
 
@@ -83,14 +88,17 @@ After installing, close and reopen your terminal so the `conda` command is avail
 In your terminal, paste these one at a time:
 
 ```bash
-mamba create -n tethys -c conda-forge "tethys-platform>=4.0" "postgresql"
+mamba create -n tethys -c conda-forge \
+  "tethys-platform>=4.0" "postgresql" "python>=3.10,<3.13"
 ```
 
-That makes a new environment called `tethys` and installs Tethys + a database into it.
-This takes a few minutes.
+That makes a new environment called `tethys` and installs Tethys + PostgreSQL + a
+supported Python version. **Pin Python here** so `tethys install -d` does not try to
+downgrade Python mid-install (which breaks if the env was created with 3.13).
 
 ```bash
 conda activate tethys
+python --version   # should show 3.10.x, 3.11.x, or 3.12.x — not 3.13
 ```
 
 Your prompt should now show `(tethys)` at the start — that means you're "inside" the new
@@ -126,8 +134,16 @@ tethys install -d
 ```
 
 This is the slow one — 5 to 15 minutes depending on your internet. It reads `install.yml`,
-downloads everything the app needs (geopandas, rasterio, leaflet, NOAA's flood model, etc.),
-and registers the app with Tethys. You can go make tea.
+downloads everything the app needs (geopandas, rasterio, **awscli**, NOAA's flood model, etc.),
+runs `post_install.py` to install FIMserv, and registers the app with Tethys.
+
+Quick sanity checks when it finishes:
+
+```bash
+python --version          # 3.10–3.12
+aws --version             # AWS CLI present (needed for HAND download)
+tethys list               # should include fimserve_viewer
+```
 
 ### Step 6 — Start the web server
 
@@ -200,19 +216,20 @@ start with `(base)`.)
 
 ### Step 2 — Create a Tethys environment and install Tethys Platform
 
-Same command as on Mac:
+Same command as on Mac (note the Python pin):
 
 ```bat
-mamba create -n tethys -c conda-forge "tethys-platform>=4.0" "postgresql"
+mamba create -n tethys -c conda-forge "tethys-platform>=4.0" "postgresql" "python>=3.10,<3.13"
 ```
 
 Then activate it:
 
 ```bat
 conda activate tethys
+python --version
 ```
 
-Your prompt should change to start with `(tethys)`.
+Your prompt should change to start with `(tethys)`. Python should be 3.10–3.12.
 
 ### Step 3 — One-time database setup
 
@@ -656,6 +673,54 @@ DEFAULT_RECLASS_TABLE = [
 
 We deliberately keep NoData distinct from 0 so users can tell apart "dry" from
 "unknown."
+
+---
+
+## Troubleshooting (fresh clone / clean machine)
+
+### `tethys install -d` fails with Python 3.13 / missing `python3.13` executable
+
+**Cause:** The Tethys conda env was created with **Python 3.13**, but this app's
+`install.yml` requires **`python>=3.10,<3.13`**. Conda may try to downgrade Python
+*during* `tethys install -d`, leaving the installer pointing at an executable that no
+longer exists.
+
+**Fix:** Recreate the environment with a supported Python from the start:
+
+```bash
+conda deactivate
+conda env remove -n tethys   # or whatever name you used
+mamba create -n tethys -c conda-forge \
+  "tethys-platform>=4.0" "postgresql" "python>=3.10,<3.13"
+conda activate tethys
+python --version             # must NOT be 3.13
+cd tethysapp-fimserve_viewer
+tethys install -d
+```
+
+### Generate Flood Map fails at Step 1 — `aws: not found` or missing `branch_ids.csv`
+
+**Cause:** Step 1 runs `aws s3 sync` against the public CIROH HAND bucket. If the
+**AWS CLI** is not on `PATH`, the download never starts, `branch_ids.csv` is never
+created, and Step 3 fails with no inundation output.
+
+**Fix:**
+
+```bash
+conda activate tethys
+conda install -c conda-forge awscli
+aws --version
+tethys install -d    # re-run if you added awscli after the first install
+```
+
+After a successful Step 1 you should see folders under the app workspace such as
+`output/flood_<HUC8>/<HUC8>/branch_ids.csv`. No AWS account is required — the bucket
+allows anonymous read (`--no-sign-request`).
+
+### Step 1 succeeds but is very slow
+
+First-time HAND download for a HUC8 is **hundreds of MB** from S3. That is expected.
+Later runs for the same HUC8 reuse cached files.
 
 ---
 

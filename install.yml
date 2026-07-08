@@ -56,6 +56,9 @@ requirements:
       - geemap
       - ipyleaflet
       - ipywidgets
+      # Step 1 (DownloadHUC8) shells out to `aws s3 sync` against the public
+      # CIROH bucket. Without awscli on PATH, Step 1 fails with "aws: not found".
+      - awscli
 
   # Pip dependencies (PyPI-only packages).
   pip:
