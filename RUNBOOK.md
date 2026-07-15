@@ -39,8 +39,11 @@ cd tethysapp-fimserve_viewer
 tethys install -d
 ```
 
-`install.yml` installs conda/pip dependencies, **awscli**, and runs `post_install.py`
-(FIMserv from GitHub with `--no-deps`).
+All runtime dependencies (scientific stack, **awscli**, teehr, and FIMserv
+pinned to a git ref) are declared in `pyproject.toml`; Tethys installs the
+app with `pip install -e .`, which resolves them. Nothing is installed via
+conda. First install downloads several GB (pyspark, jupyter stack); if `/tmp`
+is a small tmpfs, run with `TMPDIR=~/.cache/piptmp tethys install -d`.
 
 ## 4. Post-install verification
 
@@ -54,7 +57,7 @@ curl -s http://127.0.0.1:8001/apps/fimserve-viewer/api/health/   # after tethys 
 If `aws --version` fails:
 
 ```bash
-conda install -c conda-forge awscli
+python -m pip install awscli    # normally comes in via pyproject.toml
 ```
 
 ## 5. Start portal and smoke-test

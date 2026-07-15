@@ -89,10 +89,10 @@ def _load_fimserve():
         from fimserve.runFIM import runOWPHANDFIM, runfim  # type: ignore
     except Exception as exc:  # pragma: no cover - missing-dep path
         raise RuntimeError(
-            "FIMserv is not available. Install it with:\n"
-            "    python -m pip install --no-deps "
-            "git+https://github.com/sdmlua/FIMserv.git"
-            "@83b278931cea5a04e437bf5f2fde947b5904c7b6"
+            "FIMserv is not available. Install the app's dependencies "
+            "(declared in pyproject.toml, including FIMserv at a pinned git "
+            "ref) with:\n"
+            "    python -m pip install -e .   # from the repository root"
         ) from exc
 
     # runFIM binds `setup_directories` by name at import time, so the

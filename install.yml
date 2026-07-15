@@ -1,15 +1,14 @@
-# install.yml — declares what Tethys should install when someone runs
+# install.yml - declares what Tethys should install when someone runs
 # `tethys install -d` from this directory.
 #
 # Strategy
 # --------
-# * Heavy / native packages → installed by conda from conda-forge (fast,
-#   non-backtracking solver).
-# * Pure-Python packages that are PyPI-only → installed by pip.
-# * FIMserv itself → installed by `post_install.py` with `--no-deps`. Its
-#   declared dependency tree (awscli, jupyter, notebook, nodejs-bin,
-#   localtileserver, geemap, …) is not needed at runtime by this viewer
-#   app, and forcing pip to resolve it caused `error: resolution-too-deep`.
+# All runtime dependencies (scientific stack, FIMserv pinned to a git ref,
+# teehr, awscli) are declared in `pyproject.toml` and installed with pip.
+# Tethys installs the app itself with `pip install -e .`, which resolves
+# that list regardless of flags (`-w` only skips the section below), so
+# declaring packages here as well would be redundant. Nothing is installed
+# via conda anymore; a plain `pip install -e .` also works outside Tethys.
 
 version: 1.1
 tethys_version: ">=4.0.0"
@@ -18,59 +17,15 @@ name: fimserve_viewer
 requirements:
   skip: false
 
-  # Conda dependencies (installed via conda from conda-forge).
   conda:
     channels:
       - conda-forge
-    packages:
-      - python>=3.10,<3.13
-      # Core scientific stack used directly by the viewer
-      - geopandas
-      - rasterio
-      - shapely
-      - fiona
-      - pyproj
-      - pandas
-      - numpy
-      - pillow
-      - requests
-      # FIMserv runtime deps (pulled in via submodule imports in fim_logic.py)
-      - python-dotenv
-      - boto3
-      - botocore
-      - beautifulsoup4
-      - netcdf4
-      - matplotlib-base
-      - s3fs
-      - fsspec
-      - xarray
-      - tabulate
-      - scikit-learn
-      - scipy
-      - pyarrow
-      # geocube is imported by FIMserv's bundled NOAA-OWP inundation-mapping
-      # subprocess (tools/mosaic_inundation.py → `from geocube.api.core ...`).
-      # Same package that was in the original Flask requirements.txt.
-      - geocube
-      # Needed because fimserve/__init__.py eagerly imports vizualizationFIM
-      - geemap
-      - ipyleaflet
-      - ipywidgets
-      # Step 1 (DownloadHUC8) shells out to `aws s3 sync` against the public
-      # CIROH bucket. Without awscli on PATH, Step 1 fails with "aws: not found".
-      - awscli
+    packages: []
 
-  # Pip dependencies (PyPI-only packages).
-  pip:
-    # teehr is on PyPI only; pin to the same version that worked in the
-    # original Flask app so pip's resolver has minimal work to do.
-    - teehr==0.5.3
+  pip: []
 
   # (no npm packages)
   npm:
 
-# Post-install hook (top-level, not under `requirements:` — Tethys reads this
-# key from the root of install.yml). Installs FIMserv from GitHub with
-# --no-deps so pip never has to resolve FIMserv's heavy declared dep tree.
-post:
-  - post_install.py
+# (no post-install hook: Tethys installs the app with `pip install -e .`,
+# which already resolves the full pyproject.toml dependency set)

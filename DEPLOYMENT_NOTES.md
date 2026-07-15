@@ -30,7 +30,7 @@ Both issues are addressed in commits **`52e9076`** and **`254a8a8`** on the `mai
 **Unchanged (for clarity):**
 
 - Flood-mapping logic (`fim_logic.py`, `controllers.py`) - no science changes.
-- **`post_install.py`** - still installs FIMserv from GitHub with `pip install --no-deps`.
+- FIMserv is still pinned to the same GitHub commit (now via `pyproject.toml` instead of `post_install.py`).
 - Public data access - still no AWS credentials needed for HAND or NWM retrospective data.
 
 ---
@@ -90,7 +90,7 @@ cd tethysapp-fimserve_viewer
 tethys install -d
 ```
 
-This reads `install.yml`, installs conda/pip packages (including **awscli**), runs **`post_install.py`** (FIMserv), and registers the app.
+This pip-installs the dependencies declared in `pyproject.toml` (including **awscli** and FIMserv at a pinned git ref) and registers the app.
 
 ### Step 6 - Verify before testing the UI
 

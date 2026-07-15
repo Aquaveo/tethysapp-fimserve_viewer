@@ -2,7 +2,7 @@
 
 **A web app that draws flood maps for any US watershed, for any date between Feb 1979 and Jan 2023.**
 
-Open the app in a browser, click on a watershed, pick a date in that range — and a few
+Open the app in a browser, click on a watershed, pick a date in that range - and a few
 minutes later you'll see exactly which areas would have been under water. You can also
 download the result as a GIS file to use in QGIS / ArcGIS.
 
@@ -44,7 +44,7 @@ You can also:
 | Term | Plain English |
 |------|---------------|
 | **HUC8** | A small US watershed (~county-sized). The app shows ~2,500 of them. Each has an 8-digit ID like `06010105`. |
-| **NWM** (National Water Model) | NOAA's continuous river-flow forecast/historical record covering every stream in the US. We use the **NWM v3.0 retrospective** (Feb 1979 – Jan 2023). |
+| **NWM** (National Water Model) | NOAA's continuous river-flow forecast/historical record covering every stream in the US. We use the **NWM v3.0 retrospective** (Feb 1979 - Jan 2023). |
 | **Discharge / streamflow** | How much water is flowing past a point per second. Measured in m³/s or ft³/s (cfs). |
 | **Stage** | How high the water level is in the channel, in metres above the channel bottom. |
 | **HAND** (Height Above Nearest Drainage) | A terrain layer that says, for every pixel: "you are X metres above the nearest river." Used to decide if a pixel floods at a given stage. |
@@ -66,14 +66,14 @@ You can also:
 - A Mac or Linux machine.
 - About 5 GB of free disk space.
 - A reasonably fast internet connection (the model data is big).
-- 30–60 minutes of patience the first time you set this up.
-- **Python 3.10, 3.11, or 3.12** in your Tethys conda env (**not 3.13** — see
+- 30-60 minutes of patience the first time you set this up.
+- **Python 3.10, 3.11, or 3.12** in your Tethys conda env (**not 3.13** - see
   [Troubleshooting](#troubleshooting) if install fails mid-way).
 - **AWS CLI** for Step 1 (HAND download from the public CIROH S3 bucket). It is
   installed automatically via `install.yml`; verify with `aws --version` after
   `tethys install -d`. No AWS account or credentials are required (`--no-sign-request`).
 
-### Step 1 — Install conda (or mamba)
+### Step 1 - Install conda (or mamba)
 
 `conda` and its faster cousin `mamba` are package managers for Python. They let us create
 isolated "environments" so installing this app doesn't break any other Python you have.
@@ -85,7 +85,7 @@ default):
 
 After installing, close and reopen your terminal so the `conda` command is available.
 
-### Step 2 — Create a Tethys environment and install Tethys Platform
+### Step 2 - Create a Tethys environment and install Tethys Platform
 
 In your terminal, paste these one at a time:
 
@@ -100,13 +100,13 @@ downgrade Python mid-install (which breaks if the env was created with 3.13).
 
 ```bash
 conda activate tethys
-python --version   # should show 3.10.x, 3.11.x, or 3.12.x — not 3.13
+python --version   # should show 3.10.x, 3.11.x, or 3.12.x - not 3.13
 ```
 
-Your prompt should now show `(tethys)` at the start — that means you're "inside" the new
+Your prompt should now show `(tethys)` at the start - that means you're "inside" the new
 environment.
 
-### Step 3 — One-time database setup
+### Step 3 - One-time database setup
 
 Tethys uses a small local database (PostgreSQL) to keep track of which apps are installed
 and who the users are. You only do this once:
@@ -119,35 +119,36 @@ tethys db configure
 ```
 
 That's literally just "make a config file, create the database, start it, set it up."
-You'll be asked to create an `admin` user near the end — pick any username + password,
+You'll be asked to create an `admin` user near the end - pick any username + password,
 just remember them.
 
-### Step 4 — Get this app
+### Step 4 - Get this app
 
 ```bash
 git clone https://github.com/tasfia26/tethysapp-fimserve_viewer.git
 cd tethysapp-fimserve_viewer
 ```
 
-### Step 5 — Install the app's dependencies
+### Step 5 - Install the app's dependencies
 
 ```bash
 tethys install -d
 ```
 
-This is the slow one — 5 to 15 minutes depending on your internet. It reads `install.yml`,
-downloads everything the app needs (geopandas, rasterio, **awscli**, NOAA's flood model, etc.),
-runs `post_install.py` to install FIMserv, and registers the app with Tethys.
+This is the slow one - it pip-installs everything declared in `pyproject.toml`
+(geopandas, rasterio, **awscli**, FIMserv pinned to a git ref, teehr/pyspark, etc.)
+and registers the app with Tethys. Expect several GB of downloads on the first
+install. Outside Tethys, a plain `pip install -e .` installs the same set.
 
 Quick sanity checks when it finishes:
 
 ```bash
-python --version          # 3.10–3.12
+python --version          # 3.10-3.12
 aws --version             # AWS CLI present (needed for HAND download)
 tethys list               # should include fimserve_viewer
 ```
 
-### Step 6 — Start the web server
+### Step 6 - Start the web server
 
 ```bash
 tethys start -p 127.0.0.1:8001
@@ -159,33 +160,33 @@ You should see something like:
 Starting ASGI/Daphne version 4.2.1 development server at http://127.0.0.1:8001/
 ```
 
-Leave that terminal alone — that's your server. To stop it later, press **Ctrl+C** in
+Leave that terminal alone - that's your server. To stop it later, press **Ctrl+C** in
 that window.
 
-### Step 7 — Open the app
+### Step 7 - Open the app
 
 In your browser, go to:
 
 > **<http://127.0.0.1:8001/apps/fimserve-viewer/>**
 
-You should see the map. Pan around, click a HUC8 polygon — you're done.
+You should see the map. Pan around, click a HUC8 polygon - you're done.
 
-### Step 8 — Try generating your first flood map
+### Step 8 - Try generating your first flood map
 
-1. Click any HUC8 polygon (try `06010105` — Upper Tennessee — for a quick test).
+1. Click any HUC8 polygon (try `06010105` - Upper Tennessee - for a quick test).
 2. In the sidebar, set **Date** to something like `2022-04-27`, **Time** to `12:00:00`.
 3. Click **Generate Flood Map**.
-4. Wait. The first time for any given watershed takes 5–15 minutes because the app has
+4. Wait. The first time for any given watershed takes 5-15 minutes because the app has
    to download terrain data. Subsequent generations of the same watershed are fast (~1 min).
 5. When it's done you'll get a green "splash!" success message.
-6. Click **Show on map** — the flooded area appears in blue.
-7. Toggle **Show discharge numbers on map** — labels appear on each river segment.
+6. Click **Show on map** - the flooded area appears in blue.
+7. Toggle **Show discharge numbers on map** - labels appear on each river segment.
 
 ---
 
 ## Quickstart for Windows
 
-The flow is exactly the same as for macOS / Linux — install conda, create a Tethys
+The flow is exactly the same as for macOS / Linux - install conda, create a Tethys
 environment, install the app, start the server. Only the terminal commands and a couple
 of OS conventions differ.
 
@@ -194,12 +195,12 @@ of OS conventions differ.
 - Windows 10 or 11.
 - About 5 GB of free disk space.
 - A reasonably fast internet connection.
-- 30–60 minutes for first-time setup.
+- 30-60 minutes for first-time setup.
 - Recommended: install **Git for Windows** so the `git clone` command works.
   Get it at <https://git-scm.com/download/win>. After installing, you'll have a
-  "Git Bash" terminal — but you can also use Anaconda Prompt or PowerShell.
+  "Git Bash" terminal - but you can also use Anaconda Prompt or PowerShell.
 
-### Step 1 — Install Miniforge (a slim conda)
+### Step 1 - Install Miniforge (a slim conda)
 
 Download the Windows installer:
 
@@ -216,7 +217,7 @@ When done, open **Miniforge Prompt** from the Start menu. Every command in the
 following steps should be pasted into that window. (The black-and-white prompt should
 start with `(base)`.)
 
-### Step 2 — Create a Tethys environment and install Tethys Platform
+### Step 2 - Create a Tethys environment and install Tethys Platform
 
 Same command as on Mac (note the Python pin):
 
@@ -231,9 +232,9 @@ conda activate tethys
 python --version
 ```
 
-Your prompt should change to start with `(tethys)`. Python should be 3.10–3.12.
+Your prompt should change to start with `(tethys)`. Python should be 3.10-3.12.
 
-### Step 3 — One-time database setup
+### Step 3 - One-time database setup
 
 ```bat
 tethys gen portal_config
@@ -242,13 +243,13 @@ tethys db start
 tethys db configure
 ```
 
-This will ask you to create an `admin` user — pick any username + password and remember
+This will ask you to create an `admin` user - pick any username + password and remember
 them. You'll need the password whenever you log into the Tethys admin panel.
 
 > **Tip:** if `tethys db start` fails saying port 5435 is in use, another Tethys instance
 > may already be running in the background. Restart your computer and try again.
 
-### Step 4 — Get this app
+### Step 4 - Get this app
 
 Using **Git Bash** (recommended) OR Miniforge Prompt with git installed:
 
@@ -260,7 +261,7 @@ cd tethysapp-fimserve_viewer
 If you don't want to install git, you can instead **Download ZIP** from the GitHub
 repo's green "Code" button, unzip it, and `cd` into the resulting folder.
 
-### Step 5 — Install the app's dependencies
+### Step 5 - Install the app's dependencies
 
 Make sure your Miniforge Prompt is in the `tethysapp-fimserve_viewer` folder
 (`cd` to it if needed), then:
@@ -269,19 +270,19 @@ Make sure your Miniforge Prompt is in the `tethysapp-fimserve_viewer` folder
 tethys install -d
 ```
 
-This is the slow step — 5–15 minutes depending on your internet. Same as on Mac.
+This is the slow step - 5-15 minutes depending on your internet. Same as on Mac.
 
-### Step 6 — Start the web server
+### Step 6 - Start the web server
 
 ```bat
 tethys start -p 127.0.0.1:8001
 ```
 
 When you see `Starting ASGI/Daphne version ... at http://127.0.0.1:8001/` it's running.
-**Leave that window open** — that's the server. To stop it, press **Ctrl+C** in that
+**Leave that window open** - that's the server. To stop it, press **Ctrl+C** in that
 window.
 
-### Step 7 — Open the app
+### Step 7 - Open the app
 
 In your browser go to:
 
@@ -309,7 +310,7 @@ Then follow Step 8 from the macOS section above to generate your first flood map
   close the window, you'll need to set it again.
 
 - **Path separators:** Windows uses backslashes (`\`) in file paths. The Python code
-  in this app uses `pathlib`, which handles this automatically — but if you're typing
+  in this app uses `pathlib`, which handles this automatically - but if you're typing
   paths into the terminal, use backslashes (or wrap the path in double quotes).
 
 - **Long path errors:** Windows has a default 260-character path limit that can bite
@@ -343,7 +344,7 @@ to draw every HUC8 polygon in the United States. GitHub shows a yellow warning f
 file over 50 MB, so we use **Git Large File Storage (Git LFS)** to keep the main repo
 small and avoid that warning when the file is updated in the future.
 
-> **You don't need Git LFS just to use the app.** A normal `git clone` works fine — the
+> **You don't need Git LFS just to use the app.** A normal `git clone` works fine - the
 > file already on `main` will download as a regular file. You only need the steps below
 > if you're a **contributor** who plans to *modify or replace* `all_huc8.geojson` (or
 > add another large file to `tethysapp/fimserve_viewer/resources/`).
@@ -379,7 +380,7 @@ sudo apt-get install git-lfs
 git lfs install
 ```
 
-`git lfs install` only needs to run **once per machine** — it adds a small entry to your
+`git lfs install` only needs to run **once per machine** - it adds a small entry to your
 global git config that teaches git how to handle LFS files.
 
 ### What's already configured for you
@@ -395,7 +396,7 @@ tethysapp/fimserve_viewer/resources/*.tiff
 ```
 
 So if you drop a new `.geojson`, `.gpkg`, or `.tif` into the `resources/` folder, it's
-automatically tracked by LFS — no extra commands needed on your end.
+automatically tracked by LFS - no extra commands needed on your end.
 
 ### Workflow when updating a large file
 
@@ -444,7 +445,7 @@ The `git lfs track` command appends an entry to `.gitattributes`. **Always commi
   `git check-attr filter -- <file>` says `filter: lfs`, then re-add and re-commit.
 
 - **`git lfs ls-files` shows nothing after a fresh clone:** that just means the existing
-  files on `main` were committed before LFS was enabled — they're regular blobs (which
+  files on `main` were committed before LFS was enabled - they're regular blobs (which
   is fine, the app still works). Future updates will go through LFS.
 
 - **A teammate cloned and the geojson is a 130-byte text file:** they don't have Git LFS
@@ -461,7 +462,7 @@ reads top-to-bottom; each box is one thing the server does, in order:
 flowchart TD
     User([You click 'Generate Flood Map']):::user
 
-    subgraph S1["Step 1 — Download watershed data"]
+    subgraph S1["Step 1 - Download watershed data"]
         direction TB
         T1["Server asks FIMserv: get HAND data for this HUC8"]
         Cloud1[("CIROH cloud bucket - pre-computed HAND for every US watershed")]
@@ -469,7 +470,7 @@ flowchart TD
         T1 --> Cloud1 --> Files1
     end
 
-    subgraph S2["Step 2 — Get streamflow for your date"]
+    subgraph S2["Step 2 - Get streamflow for your date"]
         direction TB
         T2["Server asks NWM: streamflow on this date for every river segment in this HUC8"]
         Cloud2[("National Water Model - retrospective archive Feb 1979 to Jan 2023")]
@@ -477,7 +478,7 @@ flowchart TD
         T2 --> Cloud2 --> Files2
     end
 
-    subgraph S3["Step 3 — Compute the flood map"]
+    subgraph S3["Step 3 - Compute the flood map"]
         direction TB
         T3a["For each river segment: look up its discharge"]
         T3b["Look up the matching stage from the hydrotable"]
@@ -503,7 +504,7 @@ flowchart TD
 
 Imagine a single river segment in your watershed. We know two things about it:
 
-1. **How much water is in it right now** (from the NWM — the "discharge" in m³/s).
+1. **How much water is in it right now** (from the NWM - the "discharge" in m³/s).
 2. **A lookup table** that says: if discharge is X, the water surface is Y metres above
    the channel bottom (the "stage"). This table was pre-computed by NOAA from the
    channel's geometry + Manning's equation.
@@ -531,7 +532,7 @@ flowchart LR
         UI["Map page - HTML, JavaScript, Leaflet"]
     end
 
-    subgraph Server["Server side — Tethys app"]
+    subgraph Server["Server side - Tethys app"]
         URLs["URL router - matches /api/... to functions"]
         Ctrls["controllers.py - turns HTTP requests into Python calls"]
         Logic["fim_logic.py - all the heavy lifting (file I/O, FIMserv calls, GeoTIFF to PNG, etc.)"]
@@ -578,9 +579,8 @@ to JavaScript.**
 tethysapp-fimserve_viewer/
 │
 ├── README.md                  ← you are here
-├── install.yml                ← list of Python packages the app needs
-├── post_install.py            ← installs FIMserv after the rest is in place
-├── pyproject.toml             ← packaging metadata (mostly empty on purpose)
+├── install.yml                ← Tethys install config (deps live in pyproject.toml)
+├── pyproject.toml             ← packaging metadata + all runtime dependencies
 ├── .gitignore                 ← what NOT to commit (model outputs, etc.)
 ├── .gitattributes             ← which big files go through Git LFS
 │
@@ -662,7 +662,7 @@ GIS use. The **Download processed (reclassified)** button collapses it into:
 
 - **1** → flooded
 - **0** → dry (model said so)
-- **NoData** → outside the model's coverage (we don't know — *not* the same as "dry")
+- **NoData** → outside the model's coverage (we don't know - *not* the same as "dry")
 
 The collapse is done with a tiny rule table in `fim_logic.py`:
 
@@ -700,7 +700,7 @@ cd tethysapp-fimserve_viewer
 tethys install -d
 ```
 
-### Generate Flood Map fails at Step 1 — `aws: not found` or missing `branch_ids.csv`
+### Generate Flood Map fails at Step 1 - `aws: not found` or missing `branch_ids.csv`
 
 **Cause:** Step 1 runs `aws s3 sync` against the public CIROH HAND bucket. If the
 **AWS CLI** is not on `PATH`, the download never starts, `branch_ids.csv` is never
@@ -710,14 +710,14 @@ created, and Step 3 fails with no inundation output.
 
 ```bash
 conda activate tethys
-conda install -c conda-forge awscli
+python -m pip install awscli   # normally installed via pyproject.toml
 aws --version
 tethys install -d    # re-run if you added awscli after the first install
 ```
 
-After a successful Step 1 you should see folders under the app workspace such as
-`output/flood_<HUC8>/<HUC8>/branch_ids.csv`. No AWS account is required — the bucket
-allows anonymous read (`--no-sign-request`).
+After a successful Step 1 you should see folders under `FIMSERV_ROOT` (default
+`/var/tmp/fimserve_viewer`) such as `output/flood_<HUC8>/<HUC8>/branch_ids.csv`.
+No AWS account is required - the bucket allows anonymous read (`--no-sign-request`).
 
 ### Step 1 succeeds but is very slow
 
@@ -740,7 +740,7 @@ terrain + channel data from the cloud. Once it's on your disk, it's reused. So:
 
 Because rivers have different sizes. A small creek that handles 50 cfs in-channel will
 overflow at 92 cfs, whereas a larger river can carry 104 cfs entirely within its banks.
-The model uses each segment's individual channel geometry — so the flooding-vs-discharge
+The model uses each segment's individual channel geometry - so the flooding-vs-discharge
 relationship is different for every river. This is correct behaviour, not a bug.
 
 ### Where do the model outputs end up on my computer?
@@ -767,7 +767,7 @@ tethys start -p 127.0.0.1:8001
 Python code (`controllers.py`, `fim_logic.py`) does NOT auto-reload. Press Ctrl+C in the
 terminal where the server is running, then run `tethys start -p 127.0.0.1:8001` again.
 
-CSS, JavaScript, and HTML files DO auto-reload — just hard-refresh your browser
+CSS, JavaScript, and HTML files DO auto-reload - just hard-refresh your browser
 (Cmd+Shift+R / Ctrl+Shift+R).
 
 ### I'm getting "command not found: tethys".
@@ -788,7 +788,7 @@ That keeps `fimserve_viewer` and removes orphans. Restart the portal after.
 
 ### Can I host this somewhere public?
 
-Yes — Tethys runs anywhere Django + Daphne run. For production you'd want a real
+Yes - Tethys runs anywhere Django + Daphne run. For production you'd want a real
 PostgreSQL instance, a real ASGI server (the included Daphne is fine but small), HTTPS,
 and you should set proper CSRF tokens on the API instead of using `@csrf_exempt`. That's
 beyond this README.
@@ -797,15 +797,15 @@ beyond this README.
 
 ## Acknowledgements
 
-- **[NOAA-OWP](https://github.com/NOAA-OWP/inundation-mapping)** — for the open-source
+- **[NOAA-OWP](https://github.com/NOAA-OWP/inundation-mapping)** - for the open-source
   HAND-FIM flood-inundation model.
-- **[CIROH](https://ciroh.ua.edu/)** — for hosting the pre-computed HAND data on a free
+- **[CIROH](https://ciroh.ua.edu/)** - for hosting the pre-computed HAND data on a free
   S3 bucket.
 - **[FIMserv](https://github.com/sdmlua/FIMserv)** (Surface Dynamics Modeling Lab,
-  University of Alabama) — the Python wrapper around HAND-FIM that this app calls.
-- **[Tethys Platform](https://www.tethysplatform.org)** (Brigham Young University) — the
+  University of Alabama) - the Python wrapper around HAND-FIM that this app calls.
+- **[Tethys Platform](https://www.tethysplatform.org)** (Brigham Young University) - the
   web framework.
-- **[teehr](https://github.com/RTIInternational/teehr)** — for retrospective NWM access.
+- **[teehr](https://github.com/RTIInternational/teehr)** - for retrospective NWM access.
 
 ---
 
