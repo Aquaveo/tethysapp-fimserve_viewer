@@ -126,7 +126,7 @@ def generate_flood_map(request):
         print("Step 2: Getting NWM streamflow data...")
         fim_logic._run_flood_step2_nwm_streamflow(huc8, datetime_str)
         print("Step 3: Generating flood inundation map...")
-        fim_logic._run_flood_step3_hand_inundation(huc8)
+        fim_logic._run_flood_step3_hand_inundation(huc8, datetime_str)
 
         map_file, miss_msg = fim_logic._locate_generated_inundation_tif(
             huc8, datetime_str
@@ -206,7 +206,7 @@ def generate_flood_map_step(request, step):
             )
         # step == 3
         print("Step 3: Generating flood inundation map...")
-        fim_logic._run_flood_step3_hand_inundation(huc8)
+        fim_logic._run_flood_step3_hand_inundation(huc8, datetime_str)
         map_file, miss_msg = fim_logic._locate_generated_inundation_tif(
             huc8, datetime_str
         )
@@ -443,17 +443,17 @@ def get_flood_map(request, huc8, date_str):
                     },
                     status=500,
                 )
-            # NB: FileResponse opens the temp file in 'rb' mode and Django
-            # closes it after streaming. We delete after sending by hooking
-            # close — but in practice the OS reclaims it on process exit,
-            # and the file is small. Keep behaviour parallel to Flask.
-            response = FileResponse(
-                open(tmp_path, "rb"),
+            # Unlink immediately after opening: the open fd keeps the bytes
+            # alive until Django finishes streaming, so the temp file never
+            # outlives the request.
+            tmp_handle = open(tmp_path, "rb")
+            os.unlink(tmp_path)
+            return FileResponse(
+                tmp_handle,
                 content_type="image/tiff",
                 as_attachment=True,
                 filename=f"{map_file.stem}_reclassified.tif",
             )
-            return response
 
         return FileResponse(
             open(map_file, "rb"), content_type="image/tiff"
@@ -514,8 +514,10 @@ def get_flood_map_custom(request, huc8, discharge_str):
                     },
                     status=500,
                 )
+            tmp_handle = open(tmp_path, "rb")
+            os.unlink(tmp_path)
             return FileResponse(
-                open(tmp_path, "rb"),
+                tmp_handle,
                 content_type="image/tiff",
                 as_attachment=True,
                 filename=f"{huc8}_customQ{discharge_sanitized}_reclassified.tif",
