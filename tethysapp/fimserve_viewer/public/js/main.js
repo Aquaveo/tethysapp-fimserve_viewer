@@ -339,6 +339,7 @@ function displayHUC8Details(properties) {
             </div>
         </div>
     `;
+    reattachActiveFloodJob(huc8Code);
 }
 
 // Function to close sidebar
@@ -951,84 +952,128 @@ function showFloodSuccessModal(huc8, result) {
     if (okBtn) okBtn.addEventListener('click', hideFloodSuccessModal);
 })();
 
-// Function to generate flood map (3 server steps + progress overlay)
-async function generateFloodMap(huc8) {
-    const dateInput = document.getElementById('flood-date-input');
-    const timeInput = document.getElementById('flood-time-input');
+const FLOOD_JOB_POLL_MS = 4000;
+const FLOOD_JOB_TERMINAL_STATUSES = ['success', 'error', 'interrupted'];
+
+function setFloodStatus(html) {
     const statusDiv = document.getElementById('flood-map-status');
-    const generateBtn = document.getElementById('generate-flood-map-btn');
+    if (statusDiv) statusDiv.innerHTML = html;
+}
 
-    const date = dateInput.value;
-    const time = timeInput.value || '00:00:00';
+function setGenerateButtonBusy(busy) {
+    const btn = document.getElementById('generate-flood-map-btn');
+    if (!btn) return;
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Generating…' : 'Generate Flood Map';
+}
 
-    if (!date) {
-        statusDiv.innerHTML = '<span style="color: #e74c3c;">Please select a date</span>';
+function floodJobSleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+async function fetchJobJson(url, options) {
+    const response = await fetch(url, options);
+    let result;
+    try {
+        result = await response.json();
+    } catch (parseErr) {
+        throw new Error('Invalid response from API server.');
+    }
+    if (!response.ok || result.status !== 'success') {
+        throw new Error((result && result.message) || response.statusText || 'Request failed');
+    }
+    return result;
+}
+
+function floodJobResultSummary(job) {
+    return {
+        file_name: job.result_file ? job.result_file.split('/').pop() : '',
+        datetime: job.params ? job.params.datetime_str : '',
+    };
+}
+
+async function submitFloodJob(payload) {
+    const result = await fetchJobJson('./api/jobs/generate-flood-map/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    return result.job;
+}
+
+async function pollFloodJob(jobId, abortController) {
+    while (true) {
+        if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const result = await fetchJobJson('./api/jobs/status/' + encodeURIComponent(jobId) + '/');
+        if (FLOOD_JOB_TERMINAL_STATUSES.includes(result.job.status)) return result.job;
+        floodGenerateOverlayShow(result.job.message || 'Generating flood map…');
+        await floodJobSleep(FLOOD_JOB_POLL_MS);
+    }
+}
+
+function finishFloodJob(huc8, job) {
+    floodGenerateOverlayHide();
+    if (job.status !== 'success') {
+        setFloodStatus(`<span style="color: #e74c3c;">Error: ${job.message || job.status}</span>`);
         return;
     }
+    const summary = floodJobResultSummary(job);
+    const fileLine = summary.file_name ? `<br><span style="font-size: 11px;">File: ${summary.file_name}</span>` : '';
+    setFloodStatus(`<span style="color: #27ae60;">✓ Flood map generated successfully!</span>${fileLine}`);
+    requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+            showFloodSuccessModal(huc8, summary);
+        });
+    });
+}
 
-    const payload = { huc8: huc8, date: date, time: time };
-    const stepUi = [
-        { step: 1, label: 'Downloading HUC8 data…' },
-        { step: 2, label: 'Getting NWM streamflow data…' },
-        { step: 3, label: 'Generating flood inundation map…' },
-    ];
-
-    generateBtn.disabled = true;
-    generateBtn.textContent = 'Generating…';
-    statusDiv.innerHTML = '<span style="color: #3498db;">Generating flood map…</span>';
+async function watchFloodJob(huc8, job) {
     const abortController = new AbortController();
     currentFloodGenerateAbort = abortController;
+    setGenerateButtonBusy(true);
+    floodGenerateOverlayShow(job.message || 'Generating flood map…');
     try {
-        let lastResult = null;
-        for (let i = 0; i < stepUi.length; i++) {
-            floodGenerateOverlayShow(stepUi[i].label);
-            const response = await fetch(
-                './api/generate-flood-map/step/' + stepUi[i].step + '/',
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                    signal: abortController.signal,
-                }
-            );
-            let result;
-            try {
-                result = await response.json();
-            } catch (parseErr) {
-                floodGenerateOverlayHide();
-                statusDiv.innerHTML = '<span style="color: #e74c3c;">Error: Invalid response from API server.</span>';
-                return;
-            }
-            if (!response.ok || result.status !== 'success') {
-                floodGenerateOverlayHide();
-                const msg = (result && result.message) ? result.message : (response.statusText || 'Request failed');
-                statusDiv.innerHTML = `<span style="color: #e74c3c;">Error: ${msg}</span>`;
-                return;
-            }
-            lastResult = result;
-        }
-        floodGenerateOverlayHide();
-        if (lastResult && lastResult.file_name) {
-            statusDiv.innerHTML = `<span style="color: #27ae60;">✓ Flood map generated successfully!</span><br><span style="font-size: 11px;">File: ${lastResult.file_name}</span>`;
-        } else {
-            statusDiv.innerHTML = '<span style="color: #27ae60;">✓ Flood map generated successfully!</span>';
-        }
-        requestAnimationFrame(function () {
-            requestAnimationFrame(function () {
-                showFloodSuccessModal(huc8, lastResult);
-            });
-        });
+        finishFloodJob(huc8, await pollFloodJob(job.job_id, abortController));
     } catch (error) {
-        console.error('Error generating flood map:', error);
         floodGenerateOverlayHide();
         if (error && error.name === 'AbortError') {
-            statusDiv.innerHTML = '<span style="color: #64748b;">Generation was cancelled.</span>';
+            setFloodStatus('<span style="color: #64748b;">Stopped watching — the generation keeps running on the server.</span>');
         } else {
-            statusDiv.innerHTML = `<span style="color: #e74c3c;">Error: ${error.message}</span><br><span style="font-size: 11px;">Make sure the Tethys portal is running.</span>`;
+            console.error('Error watching flood job:', error);
+            setFloodStatus(`<span style="color: #e74c3c;">Error: ${error.message}</span>`);
         }
     } finally {
         currentFloodGenerateAbort = null;
-        generateBtn.disabled = false;
-        generateBtn.textContent = 'Generate Flood Map';
+        setGenerateButtonBusy(false);
+    }
+}
+
+async function generateFloodMap(huc8) {
+    const date = document.getElementById('flood-date-input').value;
+    const time = document.getElementById('flood-time-input').value || '00:00:00';
+    if (!date) {
+        setFloodStatus('<span style="color: #e74c3c;">Please select a date</span>');
+        return;
+    }
+    setFloodStatus('<span style="color: #3498db;">Generating flood map…</span>');
+    try {
+        const job = await submitFloodJob({ huc8: huc8, date: date, time: time });
+        await watchFloodJob(huc8, job);
+    } catch (error) {
+        floodGenerateOverlayHide();
+        setFloodStatus(`<span style="color: #e74c3c;">Error: ${error.message}</span>`);
+    }
+}
+
+async function reattachActiveFloodJob(huc8) {
+    if (currentFloodGenerateAbort) return;
+    try {
+        const result = await fetchJobJson('./api/jobs/active/?huc8=' + encodeURIComponent(huc8));
+        if (result.job) {
+            setFloodStatus('<span style="color: #3498db;">A generation for this watershed is already running…</span>');
+            await watchFloodJob(huc8, result.job);
+        }
+    } catch (error) {
+        console.error('Could not check for an active job:', error);
     }
 }
