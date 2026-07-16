@@ -77,9 +77,16 @@ def _load_fimserve():
     Also pins FIMserv's directory resolution to FIMSERV_ROOT (see
     `_patched_setup_directories`).
     """
+    # fimserve/__init__.py runs setup_directories() at import time (via
+    # fimevaluation/fims_setup.py), which creates code/, data/, output/ in
+    # the *current working directory*. Under a web server the cwd can be
+    # somewhere read-only (e.g. site-packages), so chdir into FIMSERV_ROOT
+    # for the duration of the import to make those directories land where
+    # every other part of this app expects them.
+    root = _ensure_fimserv_root_env()
+    prev_cwd = os.getcwd()
     try:
-        # Import submodules directly so we bypass FIMserv's heavy
-        # `__init__.py` (which eagerly pulls in geemap, ipyleaflet, etc.).
+        os.chdir(root)
         import fimserve.datadownload as _datadownload  # type: ignore
         import fimserve.runFIM as _runFIM  # type: ignore
         from fimserve.datadownload import DownloadHUC8  # type: ignore
@@ -94,6 +101,11 @@ def _load_fimserve():
             "ref) with:\n"
             "    python -m pip install -e .   # from the repository root"
         ) from exc
+    finally:
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            pass
 
     # runFIM binds `setup_directories` by name at import time, so the
     # override must be applied to both modules.
