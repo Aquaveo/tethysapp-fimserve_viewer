@@ -372,6 +372,19 @@ def _line_midpoint_for_label(geom):
 # ---------------------------------------------------------------------------
 # Request-body parser - takes a dict instead of reading Flask's request.
 # ---------------------------------------------------------------------------
+NWM_RETROSPECTIVE_START = datetime(1979, 2, 1)
+NWM_RETROSPECTIVE_END = datetime(2023, 2, 1)
+
+
+def validate_nwm_datetime(parsed: datetime) -> None:
+    """Raise ValueError when the datetime is outside NWM v3.0 retrospective coverage."""
+    if not (NWM_RETROSPECTIVE_START <= parsed < NWM_RETROSPECTIVE_END):
+        raise ValueError(
+            "Date must be between 1979-02-01 and 2023-01-31 "
+            "(NWM v3.0 retrospective coverage)."
+        )
+
+
 def _parse_generate_flood_json_body(data: dict) -> Tuple[str, str]:
     """Given a POST JSON body dict, return (huc8, 'YYYY-MM-DD HH:MM:SS')."""
     huc8 = data.get("huc8")
@@ -385,9 +398,10 @@ def _parse_generate_flood_json_body(data: dict) -> Tuple[str, str]:
         time_str = "00:00:00"
     datetime_str = f"{date_str} {time_str}"
     try:
-        datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+        parsed = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
     except ValueError as e:
         raise ValueError(f"Invalid date or time: {e}") from e
+    validate_nwm_datetime(parsed)
     return str(huc8), datetime_str
 
 

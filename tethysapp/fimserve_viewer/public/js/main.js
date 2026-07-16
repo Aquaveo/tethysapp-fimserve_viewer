@@ -239,15 +239,18 @@ function formatNumber(num) {
 }
 
 // Function to display HUC8 details in sidebar
+const NWM_MIN_DATE = '1979-02-01';
+const NWM_MAX_DATE = '2023-01-31';
+
+function nwmDateRangeError(date) {
+    if (date >= NWM_MIN_DATE && date <= NWM_MAX_DATE) return '';
+    return `Date must be between ${NWM_MIN_DATE} and ${NWM_MAX_DATE} (NWM retrospective coverage).`;
+}
+
 function displayHUC8Details(properties) {
     const sidebar = document.getElementById('sidebar');
     const content = document.getElementById('sidebar-content');
     const huc8Code = getHUC8(properties);
-    // NWM v3.0 retrospective covers Feb 1979 - Jan 2023; default to the last
-    // valid date instead of today (which is outside the range and can never
-    // produce a flood map).
-    const NWM_MIN_DATE = '1979-02-01';
-    const NWM_MAX_DATE = '2023-01-31';
     const defaultDate = NWM_MAX_DATE;
 
     if (lastSidebarHuc8 != null && huc8Code !== lastSidebarHuc8) {
@@ -315,6 +318,7 @@ function displayHUC8Details(properties) {
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Time (HH:MM:SS):</label>
                     <input type="time" id="flood-time-input" step="1" value="00:00:00" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" />
+                    <p style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">Model hour for the map. Note: 12:00:00 AM = midnight (00:00).</p>
                 </div>
                 <button id="generate-flood-map-btn" onclick="generateFloodMap('${huc8Code}')" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s;">
                     Generate Flood Map
@@ -1055,7 +1059,12 @@ async function generateFloodMap(huc8) {
         setFloodStatus('<span style="color: #e74c3c;">Please select a date</span>');
         return;
     }
-    setFloodStatus('<span style="color: #3498db;">Generating flood map…</span>');
+    const rangeError = nwmDateRangeError(date);
+    if (rangeError) {
+        setFloodStatus(`<span style="color: #e74c3c;">${rangeError}</span>`);
+        return;
+    }
+    setFloodStatus(`<span style="color: #3498db;">Generating flood map for ${date} ${time}…</span>`);
     try {
         const job = await submitFloodJob({ huc8: huc8, date: date, time: time });
         await watchFloodJob(huc8, job);
