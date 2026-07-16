@@ -107,10 +107,19 @@ def _load_fimserve():
         except OSError:
             pass
 
-    # runFIM binds `setup_directories` by name at import time, so the
-    # override must be applied to both modules.
-    _datadownload.setup_directories = _patched_setup_directories
-    _runFIM.setup_directories = _patched_setup_directories
+    # Sixteen fimserve modules bind `setup_directories` by name at import
+    # time (`from ..datadownload import setup_directories`), so patching
+    # the source module alone is not enough: sweep every loaded fimserve
+    # module and replace the binding wherever it exists.
+    import sys as _sys
+
+    for _name, _mod in list(_sys.modules.items()):
+        if (
+            _name.startswith("fimserve")
+            and _mod is not None
+            and getattr(_mod, "setup_directories", None) is not None
+        ):
+            _mod.setup_directories = _patched_setup_directories
 
     return {
         "DownloadHUC8": DownloadHUC8,
