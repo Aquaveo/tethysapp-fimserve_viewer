@@ -10,7 +10,7 @@
 
 {% block content_dependent_styles %}
   {{ block.super }}
-  {# base.html already loads our public/css/main.css — only Leaflet CSS here. #}
+  {# base.html already loads our public/css/main.css - only Leaflet CSS here. #}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     /* Hide Tethys's default blue "app-actions" strip at the bottom of the
@@ -23,12 +23,12 @@
 {% block app_content %}
   {# ------------------------------------------------------------------- #}
   {# Body markup ported from index.html (Flask). The <html>/<head>/<body> #}
-  {# tags are NOT included — base.html provides them.                    #}
+  {# tags are NOT included - base.html provides them.                    #}
   {# ------------------------------------------------------------------- #}
   <div id="flood-generate-overlay" class="flood-generate-overlay" aria-hidden="true" role="dialog" aria-labelledby="flood-generate-title">
       <div class="flood-generate-modal">
           <div id="flood-generate-title" class="flood-generate-modal-title">Generating flood map</div>
-          <div class="flood-generate-modal-sub">Please wait — this can take several minutes.</div>
+          <div class="flood-generate-modal-sub">Please wait - this can take several minutes.</div>
           <div class="loading-spinner flood-generate-spinner" aria-hidden="true"></div>
           <p id="flood-generate-modal-msg" class="flood-generate-modal-msg"></p>
           <button type="button" class="flood-generate-cancel-text" id="flood-generate-cancel-text">Cancel generation</button>
@@ -45,7 +45,7 @@
               <div class="flood-success-icon-inner">🌊</div>
           </div>
           <h2 id="flood-success-heading" class="flood-success-heading">Your flood map just made a splash!</h2>
-          <p class="flood-success-tagline">NWM streamflow met HAND — the inundation raster is ready.</p>
+          <p class="flood-success-tagline">NWM streamflow met HAND - the inundation raster is ready.</p>
           <div id="flood-success-detail" class="flood-success-detail"></div>
           <button type="button" class="flood-success-ok" id="flood-success-ok">Got it</button>
       </div>
@@ -73,20 +73,6 @@
               <input type="checkbox" id="flood-units-cfs-toggle" />
               <span class="flood-toggle-slider"></span>
           </label>
-      </div>
-  </div>
-  <div class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-          <h2>HUC8 Details</h2>
-          <button class="close-btn" onclick="closeSidebar()">×</button>
-      </div>
-      <div id="sidebar-content">
-          <div class="no-selection">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-              </svg>
-              <p>Click on a HUC8 watershed to view details</p>
-          </div>
       </div>
   </div>
 {% endblock %}
