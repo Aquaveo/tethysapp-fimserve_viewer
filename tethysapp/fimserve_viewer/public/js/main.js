@@ -478,25 +478,29 @@ sidebarContent.innerHTML = `
 // (`/apps/fimserve-viewer/`) into `/apps/fimserve-viewer/api/...`.
 // No more API_BASE_URL / port-probing logic from the Flask deployment.
 const APP_STATIC = (typeof window !== 'undefined' && window.APP_STATIC) ? window.APP_STATIC : {};
-const HUC8_GEOJSON_URL = APP_STATIC.huc8GeoJsonUrl || './api/all-huc8-geojson/';
+const HUC8_TOPOJSON_URL = APP_STATIC.huc8TopoJsonUrl || './api/all-huc8-topojson/';
+const huc8Renderer = L.canvas({ padding: 0.5 });
 
-// Load and display HUC8 data
+function decodeHuc8Topology(topology) {
+    return topojson.feature(topology, Object.values(topology.objects)[0]);
+}
+
 console.log('Starting to load HUC8 data...');
-fetch(HUC8_GEOJSON_URL)
+fetch(HUC8_TOPOJSON_URL)
     .then(response => {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        console.log('Response received, parsing JSON...');
         return response.json();
     })
+    .then(decodeHuc8Topology)
     .then(data => {
-        console.log(`GeoJSON parsed successfully. Features: ${data.features.length}`);
-        console.log('Creating Leaflet layer...');
-        
+        console.log(`HUC8 topology decoded. Features: ${data.features.length}`);
+
         huc8Layer = L.geoJSON(data, {
             style: styleHUC8,
-            onEachFeature: onEachFeature
+            onEachFeature: onEachFeature,
+            renderer: huc8Renderer
         }).addTo(map);
         
         console.log('Layer added to map, fitting bounds...');

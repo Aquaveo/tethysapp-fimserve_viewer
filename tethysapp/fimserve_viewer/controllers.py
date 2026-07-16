@@ -56,28 +56,34 @@ def home(request):
 # file to the browser so we don't need to duplicate the 57 MB GeoJSON into
 # `public/data/`.
 # =============================================================================
-@controller(url="api/all-huc8-geojson")
-@csrf_exempt
-def all_huc8_geojson(request):
-    """Serve the static all_huc8.geojson polygons file used by the Leaflet map."""
-    geojson_path = (
-        Path(__file__).resolve().parent / "resources" / "all_huc8.geojson"
-    )
-    if not geojson_path.is_file():
+def bundled_resource_response(filename, content_type):
+    """Serve a file from the app package's resources/ with long-lived caching."""
+    resource_path = Path(__file__).resolve().parent / "resources" / filename
+    if not resource_path.is_file():
         return JsonResponse(
             {
                 "status": "error",
-                "message": "all_huc8.geojson is missing from app resources/.",
+                "message": f"{filename} is missing from app resources/.",
             },
             status=500,
         )
-    response = FileResponse(
-        open(geojson_path, "rb"),
-        content_type="application/geo+json",
-    )
-    # Cache aggressively — file is static and ships with the package.
+    response = FileResponse(open(resource_path, "rb"), content_type=content_type)
     response["Cache-Control"] = "public, max-age=86400, immutable"
     return response
+
+
+@controller(url="api/all-huc8-geojson")
+@csrf_exempt
+def all_huc8_geojson(request):
+    """Serve the full-resolution HUC8 polygons GeoJSON."""
+    return bundled_resource_response("all_huc8.geojson", "application/geo+json")
+
+
+@controller(url="api/all-huc8-topojson")
+@csrf_exempt
+def all_huc8_topojson(request):
+    """Serve the simplified HUC8 topology used by the Leaflet map."""
+    return bundled_resource_response("all_huc8.topojson", "application/json")
 
 
 # =============================================================================
