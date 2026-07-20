@@ -1,13 +1,15 @@
 """
-fim_logic.py — Pure helper functions for the FIMserve Viewer Tethys app.
+fim_logic.py - Pure helper functions for the FIMserve Viewer Tethys app.
 
 This module is the direct counterpart of helper code that used to live in the
 Flask `server.py`. Every function here is web-framework-agnostic; the
 `controllers.py` module wraps these with `@controller`s and Django responses.
 
 Notable differences from the Flask original:
-  * `FIMSERV_ROOT` defaults to the Tethys app workspace (outside the repo)
-    instead of the sibling `FIMserv/` checkout, which no longer exists once
+  * `FIMSERV_ROOT` defaults to a disk-backed temp dir
+    (`/var/tmp/fimserve_viewer` where available, else the platform temp
+    dir) and can be overridden with the FIMSERV_ROOT env var. The sibling
+    `FIMserv/` checkout the Flask app relied on no longer exists once
     FIMserv is installed as a normal pip package.
   * `_get_huc8_boundary_for_mask` reads its fallback geojson from the app
     package's `resources/` directory instead of `<server.py>/data/`.
@@ -15,8 +17,14 @@ Notable differences from the Flask original:
     reading Flask's `request` directly.
   * `_empty_feature_collection` returns a plain dict; the controller wraps it.
   * The `_fimserve_working_directory` context manager and every `os.chdir`
-    call tied to the sibling FIMserv checkout are gone — FIMserv now reads
-    `FIMSERV_ROOT` from the environment, so no cwd manipulation is needed.
+    call tied to the sibling FIMserv checkout are gone. Upstream FIMserv
+    resolves its tree from `os.getcwd()`, so `_load_fimserve` replaces
+    `fimserve.datadownload.setup_directories` with a version pinned to
+    `FIMSERV_ROOT` - no cwd manipulation is needed.
+  * Hydrofabric disk usage is capped: `enforce_cache_budget` (implemented
+    in `manage_cache.py`) evicts the least-recently-used HUC's heavy
+    hydrofabric (~700-900 MB each) before a new download when the total
+    exceeds `FIMSERVE_CACHE_MAX_GB` (default 3).
 """
 
 import base64
@@ -44,15 +52,43 @@ from typing import Optional, Tuple
 # first call. If FIMserv is genuinely missing at call-time, the wrapper
 # raises a clear RuntimeError pointing the operator at post_install.py.
 # ---------------------------------------------------------------------------
+def _patched_setup_directories():
+    """Replacement for ``fimserve.datadownload.setup_directories``.
+
+    Upstream resolves the working tree from ``os.getcwd()``, i.e. wherever
+    the operator happened to start the portal. Pin it to ``FIMSERV_ROOT``
+    instead so downloads, outputs, and cache eviction all operate on the
+    same tree.
+    """
+    parent_dir = _ensure_fimserv_root_env()
+    code_dir = os.path.join(parent_dir, "code", "inundation-mapping")
+    data_dir = os.path.join(parent_dir, "data", "inputs")
+    output_dir = os.path.join(parent_dir, "output")
+    for d in (code_dir, data_dir, output_dir):
+        os.makedirs(d, exist_ok=True)
+    return code_dir, data_dir, output_dir
+
+
 def _load_fimserve():
     """Import FIMserv submodules on demand.
 
     Returns a dict mapping public name -> callable. Raises RuntimeError with
     actionable installation instructions if the package is unavailable.
+    Also pins FIMserv's directory resolution to FIMSERV_ROOT (see
+    `_patched_setup_directories`).
     """
+    # fimserve/__init__.py runs setup_directories() at import time (via
+    # fimevaluation/fims_setup.py), which creates code/, data/, output/ in
+    # the *current working directory*. Under a web server the cwd can be
+    # somewhere read-only (e.g. site-packages), so chdir into FIMSERV_ROOT
+    # for the duration of the import to make those directories land where
+    # every other part of this app expects them.
+    root = _ensure_fimserv_root_env()
+    prev_cwd = os.getcwd()
     try:
-        # Import submodules directly so we bypass FIMserv's heavy
-        # `__init__.py` (which eagerly pulls in geemap, ipyleaflet, etc.).
+        os.chdir(root)
+        import fimserve.datadownload as _datadownload  # type: ignore
+        import fimserve.runFIM as _runFIM  # type: ignore
         from fimserve.datadownload import DownloadHUC8  # type: ignore
         from fimserve.streamflowdata.nwmretrospective import (  # type: ignore
             getNWMretrospectivedata,
@@ -60,16 +96,37 @@ def _load_fimserve():
         from fimserve.runFIM import runOWPHANDFIM, runfim  # type: ignore
     except Exception as exc:  # pragma: no cover - missing-dep path
         raise RuntimeError(
-            "FIMserv is not available. Install it with:\n"
-            "    python -m pip install --no-deps "
-            "git+https://github.com/sdmlua/FIMserv.git"
-            "@83b278931cea5a04e437bf5f2fde947b5904c7b6"
+            "FIMserv is not available. Install the app's dependencies "
+            "(declared in pyproject.toml, including FIMserv at a pinned git "
+            "ref) with:\n"
+            "    python -m pip install -e .   # from the repository root"
         ) from exc
+    finally:
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            pass
+
+    # Sixteen fimserve modules bind `setup_directories` by name at import
+    # time (`from ..datadownload import setup_directories`), so patching
+    # the source module alone is not enough: sweep every loaded fimserve
+    # module and replace the binding wherever it exists.
+    import sys as _sys
+
+    for _name, _mod in list(_sys.modules.items()):
+        if (
+            _name.startswith("fimserve")
+            and _mod is not None
+            and getattr(_mod, "setup_directories", None) is not None
+        ):
+            _mod.setup_directories = _patched_setup_directories
+
     return {
         "DownloadHUC8": DownloadHUC8,
         "getNWMretrospectivedata": getNWMretrospectivedata,
         "runOWPHANDFIM": runOWPHANDFIM,
         "runfim": runfim,
+        "setup_directories": _patched_setup_directories,
     }
 
 
@@ -101,62 +158,47 @@ runfim = _fimserve_proxy("runfim")
 
 
 # ---------------------------------------------------------------------------
-# FIMSERV_ROOT — point FIMserv at the Tethys app workspace.
+# FIMSERV_ROOT - where FIMserv downloads, computes, and writes outputs.
 #
-# Operators can override the root by exporting FIMSERV_ROOT before starting
-# the portal (e.g. to point at shared storage). Otherwise we use the Tethys
-# app workspace, but resolved lazily — `App.get_app_workspace()` requires
-# Tethys's app registry to be fully initialised, which is NOT the case at
-# module-import time (Tethys imports our controllers before the registry is
-# wired up). Doing this lookup at first-call time (inside the proxy) defers
-# it until the first API request, by which point the registry is ready.
+# Operators can point this anywhere by exporting FIMSERV_ROOT before
+# starting the portal (e.g. shared storage or a bigger disk). When unset,
+# the app picks a disposable disk-backed temp location on its own:
+# /var/tmp/fimserve_viewer where available (unlike /tmp, /var/tmp is never
+# RAM-backed tmpfs), otherwise the platform temp dir (Windows). Everything
+# in it is a re-downloadable cache bounded by FIMSERVE_CACHE_MAX_GB, so
+# nothing of value is lost if the OS ages it out.
 # ---------------------------------------------------------------------------
-from .app import App  # noqa: E402  (import after the FIMserv block on purpose)
+def _default_fimserv_root() -> Path:
+    var_tmp = Path("/var/tmp")
+    base = var_tmp if var_tmp.is_dir() else Path(tempfile.gettempdir())
+    return base / "fimserve_viewer"
 
 
 def _ensure_fimserv_root_env() -> str:
     """Make sure ``FIMSERV_ROOT`` is exported in the process environment.
 
     Resolution order:
-      1. If FIMSERV_ROOT is already set in the environment, use that.
-      2. Otherwise try ``App.get_app_workspace().path`` (the Tethys-managed
-         app workspace). This is the recommended location.
-      3. If that raises for any reason (e.g. the app registry isn't fully
-         initialised when this runs from an unusual code path), fall back to
-         ``~/fimserve_workspace``. We CREATE the directory so FIMserv's
-         setup_directories() can write into it.
+      1. FIMSERV_ROOT from the environment (operator override).
+      2. A disk-backed temp default (see `_default_fimserv_root`).
 
-    The chosen path is exported into ``os.environ["FIMSERV_ROOT"]`` and also
-    printed to stderr so operators can see exactly where FIMserv will write.
+    The chosen path is created, exported into ``os.environ["FIMSERV_ROOT"]``,
+    and logged so operators can see exactly where FIMserv will write.
     """
     existing = os.environ.get("FIMSERV_ROOT")
     if existing:
         resolved = str(Path(existing).expanduser().resolve())
         print(f"[fimserve_viewer] FIMSERV_ROOT (from env): {resolved}", flush=True)
-        os.environ["FIMSERV_ROOT"] = resolved
-        return resolved
+    else:
+        resolved = str(_default_fimserv_root().resolve())
+        print(f"[fimserve_viewer] FIMSERV_ROOT (temp default): {resolved}", flush=True)
 
-    try:
-        workspace_path = str(Path(App.get_app_workspace().path).resolve())
-        print(
-            f"[fimserve_viewer] FIMSERV_ROOT (from app workspace): {workspace_path}",
-            flush=True,
-        )
-    except Exception as exc:  # pragma: no cover - safety net
-        workspace_path = str((Path.home() / "fimserve_workspace").resolve())
-        print(
-            f"[fimserve_viewer] FIMSERV_ROOT (fallback ~/fimserve_workspace, "
-            f"App.get_app_workspace() raised {exc!r}): {workspace_path}",
-            flush=True,
-        )
-
-    Path(workspace_path).mkdir(parents=True, exist_ok=True)
-    os.environ["FIMSERV_ROOT"] = workspace_path
-    return workspace_path
+    Path(resolved).mkdir(parents=True, exist_ok=True)
+    os.environ["FIMSERV_ROOT"] = resolved
+    return resolved
 
 
 # ---------------------------------------------------------------------------
-# Path helpers — identical to the Flask original.
+# Path helpers - identical to the Flask original.
 # ---------------------------------------------------------------------------
 def _fimserv_root() -> Path:
     """Resolve the FIMserv root directory (where output/ and data/ live)."""
@@ -189,7 +231,7 @@ def _candidate_fimserv_roots() -> list[Path]:
     web request) it falls back to ``os.getcwd()`` instead. To make the viewer
     robust to that, we search several plausible roots:
 
-      1. The configured FIMSERV_ROOT (Tethys app workspace by default).
+      1. The configured FIMSERV_ROOT (disk-backed temp dir by default).
       2. The portal's current working directory.
       3. The outer repo directory (``tethysapp-fimserve_viewer/``), because
          ``tethys start`` is typically launched from there.
@@ -268,7 +310,7 @@ _HUC8_GDF_CACHE = None
 
 
 # ---------------------------------------------------------------------------
-# NWM CSV / streams helpers — copied verbatim from server.py.
+# NWM CSV / streams helpers - copied verbatim from server.py.
 # ---------------------------------------------------------------------------
 def _pick_nwm_discharge_csv(
     data_dir: Path, huc8: str, day_key: str, full_key: str | None
@@ -328,8 +370,21 @@ def _line_midpoint_for_label(geom):
 
 
 # ---------------------------------------------------------------------------
-# Request-body parser — takes a dict instead of reading Flask's request.
+# Request-body parser - takes a dict instead of reading Flask's request.
 # ---------------------------------------------------------------------------
+NWM_RETROSPECTIVE_START = datetime(1979, 2, 1)
+NWM_RETROSPECTIVE_END = datetime(2023, 2, 1)
+
+
+def validate_nwm_datetime(parsed: datetime) -> None:
+    """Raise ValueError when the datetime is outside NWM v3.0 retrospective coverage."""
+    if not (NWM_RETROSPECTIVE_START <= parsed < NWM_RETROSPECTIVE_END):
+        raise ValueError(
+            "Date must be between 1979-02-01 and 2023-01-31 "
+            "(NWM v3.0 retrospective coverage)."
+        )
+
+
 def _parse_generate_flood_json_body(data: dict) -> Tuple[str, str]:
     """Given a POST JSON body dict, return (huc8, 'YYYY-MM-DD HH:MM:SS')."""
     huc8 = data.get("huc8")
@@ -343,17 +398,29 @@ def _parse_generate_flood_json_body(data: dict) -> Tuple[str, str]:
         time_str = "00:00:00"
     datetime_str = f"{date_str} {time_str}"
     try:
-        datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+        parsed = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
     except ValueError as e:
         raise ValueError(f"Invalid date or time: {e}") from e
+    validate_nwm_datetime(parsed)
     return str(huc8), datetime_str
 
 
 # ---------------------------------------------------------------------------
-# Three flood-generation steps. No cwd manipulation: FIMserv reads its
-# locations from FIMSERV_ROOT / FIMSERV_OUTPUT_DIR / FIMSERV_DATA_INPUTS_DIR.
+# Hydrofabric cache management lives in manage_cache.py; re-exported here so
+# callers (and tests) can keep using fim_logic.enforce_cache_budget.
+# ---------------------------------------------------------------------------
+from .manage_cache import (  # noqa: E402  (needs _candidate_fimserv_roots above)
+    enforce_cache_budget,
+    prune_huc_hydrofabric,
+)
+
+
+# ---------------------------------------------------------------------------
+# Three flood-generation steps. No cwd manipulation: `_load_fimserve` pins
+# FIMserv's setup_directories to FIMSERV_ROOT.
 # ---------------------------------------------------------------------------
 def _run_flood_step1_download_huc8(huc8: str) -> None:
+    enforce_cache_budget(protect_huc=huc8)
     try:
         DownloadHUC8(huc8, version="4.8")
     except Exception as e:
@@ -364,7 +431,30 @@ def _run_flood_step2_nwm_streamflow(huc8: str, datetime_str: str) -> None:
     getNWMretrospectivedata(huc_event_dict={huc8: [datetime_str]})
 
 
-def _run_flood_step3_hand_inundation(huc8: str) -> None:
+def _run_flood_step3_hand_inundation(huc8: str, datetime_str: Optional[str] = None) -> None:
+    """Run HAND inundation for one event.
+
+    When `datetime_str` is given, run only the discharge CSV matching that
+    event. Upstream `runOWPHANDFIM` globs *every* NWM_*_{huc}.csv ever
+    downloaded and re-runs inundation for each, so without this each request
+    silently regenerates all past events for the HUC too.
+    """
+    if datetime_str:
+        date_obj = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+        day_key = date_obj.strftime("%Y%m%d")
+        full_key = date_obj.strftime("%Y%m%d%H%M%S")
+        for data_dir in _candidate_data_inputs_dirs():
+            csv_path = _pick_nwm_discharge_csv(data_dir, huc8, day_key, full_key)
+            if csv_path is not None:
+                fns = _load_fimserve()
+                code_dir, _data_dir, output_dir = fns["setup_directories"]()
+                fns["runfim"](code_dir, output_dir, huc8, str(csv_path))
+                return
+        print(
+            f"[fimserve_viewer] No discharge CSV matched {datetime_str} for "
+            f"HUC {huc8}; falling back to runOWPHANDFIM",
+            flush=True,
+        )
     runOWPHANDFIM(huc8)
 
 
@@ -402,7 +492,7 @@ def _locate_generated_inundation_tif(
 
 
 # ---------------------------------------------------------------------------
-# Reclassification helpers — copied verbatim from server.py.
+# Reclassification helpers - copied verbatim from server.py.
 # ---------------------------------------------------------------------------
 def _reclassify_by_table(tif_path, out_path, reclass_table, output_nodata=-9999.0):
     """
@@ -443,7 +533,7 @@ DEFAULT_RECLASS_TABLE = [
 
 
 # ---------------------------------------------------------------------------
-# HUC8 boundary lookup — fallback path now points at the bundled
+# HUC8 boundary lookup - fallback path now points at the bundled
 # resources/all_huc8.geojson instead of <server.py>/data/all_huc8.geojson.
 # ---------------------------------------------------------------------------
 def _get_huc8_boundary_for_mask(huc8_code):
@@ -568,7 +658,7 @@ def _huc8_mask_for_raster_crs(huc8_code, src_crs, transform, shape):
 
 
 # ---------------------------------------------------------------------------
-# Main preview generator — copied verbatim from server.py.
+# Main preview generator - copied verbatim from server.py.
 # ---------------------------------------------------------------------------
 def _tif_to_preview_png(tif_path, huc8=None):
     """
@@ -910,22 +1000,20 @@ def run_custom_discharge_flood_map(huc8: str, discharge_val: float) -> Path:
 
     _ensure_fimserv_root_env()
 
-    try:
-        from fimserve.datadownload import setup_directories  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(
-            "FIMserv is not available. Install it with:\n"
-            "    python -m pip install --no-deps "
-            "git+https://github.com/sdmlua/FIMserv.git"
-            "@83b278931cea5a04e437bf5f2fde947b5904c7b6"
-        ) from exc
-
-    code_dir, data_dir, output_dir = setup_directories()
+    # Raises RuntimeError with install instructions if FIMserv is missing,
+    # and pins setup_directories to FIMSERV_ROOT.
+    fns = _load_fimserve()
+    code_dir, data_dir, output_dir = fns["setup_directories"]()
 
     huc_dir = Path(output_dir) / f"flood_{huc8}"
     feature_ids_path = huc_dir / "feature_IDs.csv"
 
-    if not feature_ids_path.exists():
+    # branches/ is deleted by cache eviction while feature_IDs.csv is kept,
+    # so check both before deciding the HUC data is ready to run.
+    hydrofabric_ready = (huc_dir / huc8 / "branches").is_dir()
+
+    if not feature_ids_path.exists() or not hydrofabric_ready:
+        enforce_cache_budget(protect_huc=huc8)
         DownloadHUC8(huc8, version="4.8")
         if not feature_ids_path.exists():
             raise FileNotFoundError(
@@ -1094,6 +1182,8 @@ __all__ = [
     "_nwm_streams_fid_column",
     "_line_midpoint_for_label",
     "_parse_generate_flood_json_body",
+    "enforce_cache_budget",
+    "prune_huc_hydrofabric",
     "_run_flood_step1_download_huc8",
     "_run_flood_step2_nwm_streamflow",
     "_run_flood_step3_hand_inundation",

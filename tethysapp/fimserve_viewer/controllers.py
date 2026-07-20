@@ -56,28 +56,34 @@ def home(request):
 # file to the browser so we don't need to duplicate the 57 MB GeoJSON into
 # `public/data/`.
 # =============================================================================
-@controller(url="api/all-huc8-geojson")
-@csrf_exempt
-def all_huc8_geojson(request):
-    """Serve the static all_huc8.geojson polygons file used by the Leaflet map."""
-    geojson_path = (
-        Path(__file__).resolve().parent / "resources" / "all_huc8.geojson"
-    )
-    if not geojson_path.is_file():
+def bundled_resource_response(filename, content_type):
+    """Serve a file from the app package's resources/ with long-lived caching."""
+    resource_path = Path(__file__).resolve().parent / "resources" / filename
+    if not resource_path.is_file():
         return JsonResponse(
             {
                 "status": "error",
-                "message": "all_huc8.geojson is missing from app resources/.",
+                "message": f"{filename} is missing from app resources/.",
             },
             status=500,
         )
-    response = FileResponse(
-        open(geojson_path, "rb"),
-        content_type="application/geo+json",
-    )
-    # Cache aggressively — file is static and ships with the package.
+    response = FileResponse(open(resource_path, "rb"), content_type=content_type)
     response["Cache-Control"] = "public, max-age=86400, immutable"
     return response
+
+
+@controller(url="api/all-huc8-geojson")
+@csrf_exempt
+def all_huc8_geojson(request):
+    """Serve the full-resolution HUC8 polygons GeoJSON."""
+    return bundled_resource_response("all_huc8.geojson", "application/geo+json")
+
+
+@controller(url="api/all-huc8-topojson")
+@csrf_exempt
+def all_huc8_topojson(request):
+    """Serve the simplified HUC8 topology used by the Leaflet map."""
+    return bundled_resource_response("all_huc8.topojson", "application/json")
 
 
 # =============================================================================
@@ -126,7 +132,7 @@ def generate_flood_map(request):
         print("Step 2: Getting NWM streamflow data...")
         fim_logic._run_flood_step2_nwm_streamflow(huc8, datetime_str)
         print("Step 3: Generating flood inundation map...")
-        fim_logic._run_flood_step3_hand_inundation(huc8)
+        fim_logic._run_flood_step3_hand_inundation(huc8, datetime_str)
 
         map_file, miss_msg = fim_logic._locate_generated_inundation_tif(
             huc8, datetime_str
@@ -206,7 +212,7 @@ def generate_flood_map_step(request, step):
             )
         # step == 3
         print("Step 3: Generating flood inundation map...")
-        fim_logic._run_flood_step3_hand_inundation(huc8)
+        fim_logic._run_flood_step3_hand_inundation(huc8, datetime_str)
         map_file, miss_msg = fim_logic._locate_generated_inundation_tif(
             huc8, datetime_str
         )
@@ -443,17 +449,17 @@ def get_flood_map(request, huc8, date_str):
                     },
                     status=500,
                 )
-            # NB: FileResponse opens the temp file in 'rb' mode and Django
-            # closes it after streaming. We delete after sending by hooking
-            # close — but in practice the OS reclaims it on process exit,
-            # and the file is small. Keep behaviour parallel to Flask.
-            response = FileResponse(
-                open(tmp_path, "rb"),
+            # Unlink immediately after opening: the open fd keeps the bytes
+            # alive until Django finishes streaming, so the temp file never
+            # outlives the request.
+            tmp_handle = open(tmp_path, "rb")
+            os.unlink(tmp_path)
+            return FileResponse(
+                tmp_handle,
                 content_type="image/tiff",
                 as_attachment=True,
                 filename=f"{map_file.stem}_reclassified.tif",
             )
-            return response
 
         return FileResponse(
             open(map_file, "rb"), content_type="image/tiff"
@@ -514,8 +520,10 @@ def get_flood_map_custom(request, huc8, discharge_str):
                     },
                     status=500,
                 )
+            tmp_handle = open(tmp_path, "rb")
+            os.unlink(tmp_path)
             return FileResponse(
-                open(tmp_path, "rb"),
+                tmp_handle,
                 content_type="image/tiff",
                 as_attachment=True,
                 filename=f"{huc8}_customQ{discharge_sanitized}_reclassified.tif",

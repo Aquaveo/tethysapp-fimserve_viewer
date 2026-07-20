@@ -1,4 +1,4 @@
-# FIMserve Viewer — Clean-environment runbook
+# FIMserve Viewer - Clean-environment runbook
 
 Use this checklist when installing from a **fresh git clone** on a machine that has
 never run the app before. It addresses the two most common first-install failures
@@ -39,8 +39,11 @@ cd tethysapp-fimserve_viewer
 tethys install -d
 ```
 
-`install.yml` installs conda/pip dependencies, **awscli**, and runs `post_install.py`
-(FIMserv from GitHub with `--no-deps`).
+All runtime dependencies (scientific stack, **awscli**, teehr, and FIMserv
+pinned to a git ref) are declared in `pyproject.toml`; Tethys installs the
+app with `pip install -e .`, which resolves them. Nothing is installed via
+conda. First install downloads several GB (pyspark, jupyter stack); if `/tmp`
+is a small tmpfs, run with `TMPDIR=~/.cache/piptmp tethys install -d`.
 
 ## 4. Post-install verification
 
@@ -54,7 +57,7 @@ curl -s http://127.0.0.1:8001/apps/fimserve-viewer/api/health/   # after tethys 
 If `aws --version` fails:
 
 ```bash
-conda install -c conda-forge awscli
+python -m pip install awscli    # normally comes in via pyproject.toml
 ```
 
 ## 5. Start portal and smoke-test
@@ -67,26 +70,50 @@ Browser: <http://127.0.0.1:8001/apps/fimserve-viewer/>
 
 Test watershed: HUC8 `06010105`, date `2022-04-27`, time `12:00:00` → **Generate Flood Map**.
 
-First run per HUC8: **5–15 minutes** (HAND download from S3). Watch the terminal for
+First run per HUC8: **5-15 minutes** (HAND download from S3). Watch the terminal for
 Step 1/2/3 progress messages.
 
 ## 6. Confirm Step 1 wrote HAND data
 
-After Step 1 completes, the app workspace should contain (paths vary by machine):
+After Step 1 completes, `FIMSERV_ROOT` should contain:
 
 ```
 <FIMSERV_ROOT>/output/flood_<HUC8>/<HUC8>/branch_ids.csv
 <FIMSERV_ROOT>/output/flood_<HUC8>/<HUC8>/hydrotable.csv
 ```
 
-Default `FIMSERV_ROOT` is the Tethys **app workspace** (outside the git repo).
+Default `FIMSERV_ROOT` is **`/var/tmp/fimserve_viewer`** (platform temp dir on
+Windows). The portal terminal prints the resolved path at first use.
+
+## Disk space management
+
+A first-time HUC8 download is **~700-900 MB** of hydrofabric; the generated
+flood-map tif is only ~2 MB. To keep a small server (e.g. a shared sandbox)
+from filling up, the app caps the total hydrofabric footprint:
+
+- `FIMSERVE_CACHE_MAX_GB` (default **3**) - before each new HUC download,
+  the least-recently-used HUCs' heavy hydrofabric internals (`branches/`,
+  `hydrotable.csv`, ...) are deleted until the total fits the cap. Generated
+  tifs and the small sidecar files (boundary/streams gpkg) are always kept,
+  so previews/labels/downloads of past maps keep working. An evicted HUC is
+  re-downloaded automatically on its next request (`aws s3 sync` fetches
+  only the missing files). Set to `0` to disable eviction.
+- `FIMSERV_ROOT` - where all FIMserv data lives. **Optional**: defaults to
+  `/var/tmp/fimserve_viewer` (disk-backed, survives reboots, OS may age out
+  stale files - fine, everything here is a re-downloadable cache), or the
+  platform temp dir on Windows. Export `FIMSERV_ROOT` to point it anywhere
+  else (bigger disk, shared storage). Never point it at `/tmp` if that is
+  tmpfs - tmpfs is RAM (check with `findmnt /tmp`).
+
+**Budget rule of thumb:** allow `FIMSERVE_CACHE_MAX_GB` + ~1.5 GB headroom
+per concurrent first-time generation. With the defaults, ~5 GB free is safe.
 
 ## External data (no credentials)
 
 | Step | Source | Auth |
 |------|--------|------|
-| 1 — HAND bundle | `s3://ciroh-owp-hand-fim/...` | Public (`--no-sign-request`) |
-| 2 — NWM retrospective | AWS Open Data via **teehr** | Public |
+| 1 - HAND bundle | `s3://ciroh-owp-hand-fim/...` | Public (`--no-sign-request`) |
+| 2 - NWM retrospective | AWS Open Data via **teehr** | Public |
 
 ## If install already failed once
 

@@ -21,14 +21,59 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-# NOTE: We deliberately leave `dependencies` empty. Runtime dependencies
-# (the scientific stack, FIMserv's transitive deps, teehr, and FIMserv
-# itself) are managed by `install.yml` so they can be split between conda
-# and pip and so FIMserv can be pip-installed with --no-deps via
-# post_install.py. Listing them here as well would force pip to resolve
-# FIMserv's full dependency graph during `pip install -e .`, which causes
-# `error: resolution-too-deep`.
-dependencies = []
+# FIMserv requires >=3.10,<3.13, so the app inherits that ceiling.
+requires-python = ">=3.10,<3.13"
+
+# All runtime dependencies are pip-installed from here (`pip install -e .`).
+# FIMserv is pinned to a specific commit for reproducibility; its own
+# dependency list additionally pulls teehr==0.5.0, geemap, awscli, numba,
+# tqdm, and the jupyter stack.
+dependencies = [
+    # FIMserv, pinned. Bump the ref here to upgrade.
+    "fimserve @ git+https://github.com/sdmlua/FIMserv.git@83b278931cea5a04e437bf5f2fde947b5904c7b6",
+
+    # Imported directly by the viewer (fim_logic.py / controllers.py).
+    "geopandas",
+    "rasterio",
+    "shapely",
+    "fiona",
+    "pyproj",
+    "pandas",
+    "numpy",
+    "pillow",
+    "requests",
+    # Hydrograph endpoint. FIMserv pins teehr==0.5.0, so the resolver will
+    # settle there; keep the range open within 0.5.x rather than fighting it.
+    "teehr>=0.5.0,<0.6",
+    # Transitive via teehr (which allows >=4,<5), pinned exactly to stop pip
+    # from walking 4.x candidates - each pyspark sdist is ~434 MB.
+    "pyspark==4.0.3",
+
+    # Needed by the NOAA inundation-mapping subprocess that FIMserv spawns
+    # (tools/inundate_mosaic_wrapper.py and friends).
+    "geocube",
+    "rioxarray",
+    "xarray",
+    "numba",
+    "tqdm",
+
+    # Step 1 (DownloadHUC8) shells out to `aws s3 sync` against the public
+    # CIROH bucket, so the `aws` CLI must be on PATH.
+    "awscli",
+
+    # Remaining FIMserv runtime imports previously listed in install.yml.
+    "python-dotenv",
+    "boto3",
+    "s3fs",
+    "fsspec",
+    "netcdf4",
+    "pyarrow",
+    "matplotlib",
+    "beautifulsoup4",
+    "tabulate",
+    "scikit-learn",
+    "scipy",
+]
 
 [tool.setuptools]
 include-package-data = true

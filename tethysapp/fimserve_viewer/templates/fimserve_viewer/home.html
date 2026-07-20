@@ -3,14 +3,13 @@
 
 {% block title %}HUC8 Watershed Explorer{% endblock %}
 
-{% block app_navigation_items %}
-  <li class="nav-item title">App Navigation</li>
-  <li class="nav-item active"><a class="nav-link" href="">Home</a></li>
-{% endblock %}
+{% block app_navigation_toggle_override %}{% endblock %}
+
+
 
 {% block content_dependent_styles %}
   {{ block.super }}
-  {# base.html already loads our public/css/main.css — only Leaflet CSS here. #}
+  {# base.html already loads our public/css/main.css - only Leaflet CSS here. #}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     /* Hide Tethys's default blue "app-actions" strip at the bottom of the
@@ -23,12 +22,12 @@
 {% block app_content %}
   {# ------------------------------------------------------------------- #}
   {# Body markup ported from index.html (Flask). The <html>/<head>/<body> #}
-  {# tags are NOT included — base.html provides them.                    #}
+  {# tags are NOT included - base.html provides them.                    #}
   {# ------------------------------------------------------------------- #}
   <div id="flood-generate-overlay" class="flood-generate-overlay" aria-hidden="true" role="dialog" aria-labelledby="flood-generate-title">
       <div class="flood-generate-modal">
           <div id="flood-generate-title" class="flood-generate-modal-title">Generating flood map</div>
-          <div class="flood-generate-modal-sub">Please wait — this can take several minutes.</div>
+          <div class="flood-generate-modal-sub">Please wait - this can take several minutes.</div>
           <div class="loading-spinner flood-generate-spinner" aria-hidden="true"></div>
           <p id="flood-generate-modal-msg" class="flood-generate-modal-msg"></p>
           <button type="button" class="flood-generate-cancel-text" id="flood-generate-cancel-text">Cancel generation</button>
@@ -45,7 +44,7 @@
               <div class="flood-success-icon-inner">🌊</div>
           </div>
           <h2 id="flood-success-heading" class="flood-success-heading">Your flood map just made a splash!</h2>
-          <p class="flood-success-tagline">NWM streamflow met HAND — the inundation raster is ready.</p>
+          <p class="flood-success-tagline">NWM streamflow met HAND - the inundation raster is ready.</p>
           <div id="flood-success-detail" class="flood-success-detail"></div>
           <button type="button" class="flood-success-ok" id="flood-success-ok">Got it</button>
       </div>
@@ -104,5 +103,6 @@
     };
   </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
   {{ block.super }}
 {% endblock %}

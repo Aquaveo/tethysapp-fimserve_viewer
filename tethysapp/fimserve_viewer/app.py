@@ -14,3 +14,4 @@ class App(TethysAppBase):
     tags = '"Hydrology","Hydroinformatics","Flood","FIMserv"'
     enable_feedback = False
     feedback_emails = []
+    controller_modules = ['job_controllers']
