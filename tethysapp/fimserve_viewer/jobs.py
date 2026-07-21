@@ -1,14 +1,16 @@
 """Background job manager for flood-map generation.
 
-Runs one generation at a time in a worker thread. Deduplication and the
-right to execute a job are both enforced in the database, so any number of
-portal replicas can run a manager safely.
+Runs one generation at a time in a worker thread. Deduplication and job
+ownership are enforced in the database, and a replica-wide heartbeat covers
+every job this replica owns (queued or running), so any number of portal
+replicas can run a manager safely.
 """
 
 import os
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from typing import Callable, Optional, Tuple
 
 from .job_store import JobStore
@@ -21,30 +23,8 @@ STALE_TIMEOUT_SECONDS = 180
 
 
 def worker_identity() -> str:
-    """Identity of this replica and process, recorded on claimed jobs."""
+    """Identity of this replica and process, recorded on owned jobs."""
     return f"{socket.gethostname()}:{os.getpid()}"
-
-
-class Heartbeat:
-    """Periodically refreshes a job's heartbeat while its pipeline runs."""
-
-    def __init__(self, store: JobStore, job_id: str, interval: int = HEARTBEAT_SECONDS):
-        self.store = store
-        self.job_id = job_id
-        self.interval = interval
-        self.stopped = threading.Event()
-        self.thread = threading.Thread(target=self.run, daemon=True)
-
-    def run(self):
-        while not self.stopped.wait(self.interval):
-            self.store.touch(self.job_id)
-
-    def __enter__(self):
-        self.thread.start()
-        return self
-
-    def __exit__(self, *exc_info):
-        self.stopped.set()
 
 
 class JobManager:
@@ -53,6 +33,15 @@ class JobManager:
     def __init__(self, store: Optional[JobStore] = None, max_workers: int = 1):
         self.store = store or JobStore()
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="fimjob")
+        self.heartbeat_thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
+        self.heartbeat_thread.start()
+
+    def heartbeat_loop(self) -> None:
+        """Refresh heartbeats for this replica's active jobs, forever."""
+        ticker = threading.Event()
+        while not ticker.wait(HEARTBEAT_SECONDS):
+            with suppress(Exception):
+                self.store.touch_owned(worker_identity())
 
     def submit(self, kind: str, huc8: str, key: str, params: dict, runner: JobRunner) -> Tuple[dict, bool]:
         """Queue a job, or return the already-active job with the same key.
@@ -61,13 +50,15 @@ class JobManager:
         duplicate was found.
         """
         self.store.mark_stale_interrupted(STALE_TIMEOUT_SECONDS)
-        job, created = self.store.create_or_get_active(kind=kind, huc8=huc8, key=key, params=params)
+        job, created = self.store.create_or_get_active(
+            kind=kind, huc8=huc8, key=key, params=params, owner=worker_identity()
+        )
         if created:
             self.executor.submit(self.execute, job["id"], runner)
         return job, created
 
     def execute(self, job_id: str, runner: JobRunner) -> None:
-        """Run one claimed job to completion, recording progress and outcome."""
+        """Run one owned job to completion, recording progress and outcome."""
         if not self.store.claim(job_id, worker_identity()):
             return
         job = self.store.get(job_id)
@@ -77,12 +68,11 @@ class JobManager:
         def progress(status: str, message: str = "") -> None:
             self.store.update_progress(job_id, status, message)
 
-        with Heartbeat(self.store, job_id):
-            try:
-                result_file = runner(job, progress)
-                self.store.finish(job_id, JobStatus.SUCCESS, "Flood map generated successfully.", result_file)
-            except Exception as exc:
-                self.store.finish(job_id, JobStatus.ERROR, str(exc))
+        try:
+            result_file = runner(job, progress)
+            self.store.finish(job_id, JobStatus.SUCCESS, "Flood map generated successfully.", result_file)
+        except Exception as exc:
+            self.store.finish(job_id, JobStatus.ERROR, str(exc))
 
     def get(self, job_id: str) -> Optional[dict]:
         return self.store.get(job_id)

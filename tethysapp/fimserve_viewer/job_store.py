@@ -40,15 +40,15 @@ class JobStore:
         finally:
             session.close()
 
-    def create_or_get_active(self, kind: str, huc8: str, key: str, params: dict) -> Tuple[dict, bool]:
-        """Insert a queued job, or return the active duplicate with the same key.
+    def create_or_get_active(self, kind: str, huc8: str, key: str, params: dict, owner: str) -> Tuple[dict, bool]:
+        """Insert a queued job owned by this replica, or return the active duplicate.
 
         The partial unique index on active keys makes this race-safe across
         replicas: the losing inserter adopts the winner's job.
         """
         try:
             with self.session() as session:
-                job = Job(key=key, kind=kind, huc8=huc8, params=params)
+                job = Job(key=key, kind=kind, huc8=huc8, params=params, claimed_by=owner)
                 session.add(job)
                 session.flush()
                 return job.to_dict(), True
@@ -59,12 +59,12 @@ class JobStore:
             return existing, False
 
     def claim(self, job_id: str, worker: str) -> bool:
-        """Atomically take ownership of an unclaimed queued job; False if taken."""
+        """Confirm a queued job is still this worker's to run; False otherwise."""
         with self.session() as session:
             claimed = (
                 session.query(Job)
-                .filter(Job.id == job_id, Job.status == JobStatus.QUEUED, Job.claimed_by == "")
-                .update({"claimed_by": worker, "heartbeat_at": utcnow(), "updated_at": utcnow()})
+                .filter(Job.id == job_id, Job.status == JobStatus.QUEUED, Job.claimed_by == worker)
+                .update({"heartbeat_at": utcnow(), "updated_at": utcnow()})
             )
             return claimed == 1
 
@@ -76,9 +76,12 @@ class JobStore:
         """Record the terminal state of a job."""
         self.update_fields(job_id, status=status, message=message, result_file=result_file)
 
-    def touch(self, job_id: str) -> None:
-        """Refresh the heartbeat so other replicas know the job is alive."""
-        self.update_fields(job_id, heartbeat_at=utcnow())
+    def touch_owned(self, owner: str) -> None:
+        """Refresh the heartbeat of every active job owned by this replica."""
+        with self.session() as session:
+            session.query(Job).filter(
+                Job.status.in_(JobStatus.ACTIVE), Job.claimed_by == owner
+            ).update({"heartbeat_at": utcnow()}, synchronize_session=False)
 
     def update_fields(self, job_id: str, **fields) -> None:
         """Apply column updates to one job, stamping ``updated_at``."""
