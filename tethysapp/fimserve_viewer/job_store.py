@@ -1,124 +1,133 @@
-"""Job records and file-backed persistence for background flood-map jobs.
+"""Database-backed persistence for background flood-map jobs.
 
-Each job is stored as one JSON file under ``<FIMSERV_ROOT>/jobs/`` so state
-survives portal restarts without requiring a database table.
+All reads and writes go through the app persistent store so every portal
+replica sees the same job records. Methods return plain dicts, never live
+ORM objects.
 """
 
-import json
-import threading
-import uuid
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Optional
+from contextlib import contextmanager
+from datetime import timedelta
+from typing import Optional, Tuple
+
+from sqlalchemy.exc import IntegrityError
+
+from .model import Job, JobStatus, utcnow
 
 
-class JobKind:
-    NWM = "nwm"
-    CUSTOM = "custom"
+def app_session_maker():
+    """Session factory bound to the app's ``jobs_db`` persistent store."""
+    from .app import App
 
-
-class JobStatus:
-    QUEUED = "queued"
-    STEP1 = "step1"
-    STEP2 = "step2"
-    STEP3 = "step3"
-    SUCCESS = "success"
-    ERROR = "error"
-    INTERRUPTED = "interrupted"
-
-    ACTIVE = frozenset({QUEUED, STEP1, STEP2, STEP3})
-
-
-def utcnow() -> str:
-    """Current UTC time as an ISO-8601 string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-@dataclass
-class Job:
-    """A single background generation request and its lifecycle state."""
-
-    id: str
-    key: str
-    kind: str
-    huc8: str
-    params: dict
-    status: str = JobStatus.QUEUED
-    message: str = ""
-    result_file: str = ""
-    created_at: str = field(default_factory=utcnow)
-    updated_at: str = field(default_factory=utcnow)
-
-    def is_active(self) -> bool:
-        return self.status in JobStatus.ACTIVE
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Job":
-        return cls(**data)
-
-    @classmethod
-    def new(cls, kind: str, huc8: str, key: str, params: dict) -> "Job":
-        return cls(id=uuid.uuid4().hex[:12], key=key, kind=kind, huc8=huc8, params=params)
+    return App.get_persistent_store_database("jobs_db", as_sessionmaker=True)
 
 
 class JobStore:
-    """Reads and writes :class:`Job` records as JSON files in a directory."""
+    """Reads and writes job records in the ``jobs_db`` persistent store."""
 
-    def __init__(self, directory: Path):
-        self.directory = Path(directory)
-        self.directory.mkdir(parents=True, exist_ok=True)
-        self.lock = threading.Lock()
+    def __init__(self, session_maker=None):
+        self.session_maker = session_maker or app_session_maker()
 
-    def path_for(self, job_id: str) -> Path:
-        return self.directory / f"{job_id}.json"
-
-    def save(self, job: Job) -> None:
-        """Persist atomically (temp file + rename) so readers never see a partial file."""
-        job.updated_at = utcnow()
-        path = self.path_for(job.id)
-        temp_path = path.with_name(path.name + ".tmp")
-        with self.lock:
-            temp_path.write_text(json.dumps(job.to_dict(), indent=2))
-            temp_path.replace(path)
-
-    def create(self, kind: str, huc8: str, key: str, params: dict) -> Job:
-        job = Job.new(kind=kind, huc8=huc8, key=key, params=params)
-        self.save(job)
-        return job
-
-    def get(self, job_id: str) -> Optional[Job]:
-        path = self.path_for(job_id)
-        if not path.is_file():
-            return None
-        return self.read_file(path)
-
-    def read_file(self, path: Path) -> Optional[Job]:
+    @contextmanager
+    def session(self):
+        """Yield a session that commits on success and rolls back on error."""
+        session = self.session_maker()
         try:
-            return Job.from_dict(json.loads(path.read_text()))
-        except (ValueError, TypeError, OSError):
-            return None
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
-    def all_jobs(self) -> List[Job]:
-        jobs = [self.read_file(p) for p in sorted(self.directory.glob("*.json"))]
-        return [job for job in jobs if job is not None]
+    def create_or_get_active(self, kind: str, huc8: str, key: str, params: dict, owner: str) -> Tuple[dict, bool]:
+        """Insert a queued job owned by this replica, or return the active duplicate.
 
-    def find_active(self, key: str) -> Optional[Job]:
-        return next((j for j in self.all_jobs() if j.key == key and j.is_active()), None)
-
-    def find_active_for_huc(self, huc8: str) -> Optional[Job]:
-        return next((j for j in self.all_jobs() if j.huc8 == huc8 and j.is_active()), None)
-
-    def mark_interrupted_jobs(self) -> None:
-        """Flag jobs left active by a previous process as interrupted.
-
-        Call once at manager startup, before any worker runs.
+        The partial unique index on active keys makes this race-safe across
+        replicas: the losing inserter adopts the winner's job.
         """
-        for job in self.all_jobs():
-            if job.is_active():
-                job.status = JobStatus.INTERRUPTED
-                job.message = "The portal restarted while this job was running."
-                self.save(job)
+        try:
+            with self.session() as session:
+                job = Job(key=key, kind=kind, huc8=huc8, params=params, claimed_by=owner)
+                session.add(job)
+                session.flush()
+                return job.to_dict(), True
+        except IntegrityError:
+            existing = self.find_active(key)
+            if existing is None:
+                raise
+            return existing, False
+
+    def claim(self, job_id: str, worker: str) -> bool:
+        """Confirm a queued job is still this worker's to run; False otherwise."""
+        with self.session() as session:
+            claimed = (
+                session.query(Job)
+                .filter(Job.id == job_id, Job.status == JobStatus.QUEUED, Job.claimed_by == worker)
+                .update({"heartbeat_at": utcnow(), "updated_at": utcnow()})
+            )
+            return claimed == 1
+
+    def update_progress(self, job_id: str, status: str, message: str = "") -> None:
+        """Record a status transition reported by the running pipeline."""
+        self.update_fields(job_id, status=status, message=message, heartbeat_at=utcnow())
+
+    def finish(self, job_id: str, status: str, message: str, result_file: str = "") -> None:
+        """Record the terminal state of a job."""
+        self.update_fields(job_id, status=status, message=message, result_file=result_file)
+
+    def touch_owned(self, owner: str) -> None:
+        """Refresh the heartbeat of every active job owned by this replica."""
+        with self.session() as session:
+            session.query(Job).filter(
+                Job.status.in_(JobStatus.ACTIVE), Job.claimed_by == owner
+            ).update({"heartbeat_at": utcnow()}, synchronize_session=False)
+
+    def update_fields(self, job_id: str, **fields) -> None:
+        """Apply column updates to one job, stamping ``updated_at``."""
+        fields["updated_at"] = utcnow()
+        with self.session() as session:
+            session.query(Job).filter(Job.id == job_id).update(fields)
+
+    def get(self, job_id: str) -> Optional[dict]:
+        """Return one job as a dict, or None."""
+        with self.session() as session:
+            job = session.get(Job, job_id)
+            return job.to_dict() if job else None
+
+    def find_active(self, key: str) -> Optional[dict]:
+        """Return the active job with the given key, or None."""
+        return self.first_active_dict(Job.key == key)
+
+    def find_active_for_huc(self, huc8: str) -> Optional[dict]:
+        """Return the active job for a HUC8, or None."""
+        return self.first_active_dict(Job.huc8 == huc8)
+
+    def first_active_dict(self, *criteria) -> Optional[dict]:
+        """Return the first active job matching the criteria, or None."""
+        with self.session() as session:
+            job = (
+                session.query(Job)
+                .filter(Job.status.in_(JobStatus.ACTIVE), *criteria)
+                .order_by(Job.created_at)
+                .first()
+            )
+            return job.to_dict() if job else None
+
+    def mark_stale_interrupted(self, timeout_seconds: int = 180) -> None:
+        """Mark active jobs with a stale heartbeat as interrupted.
+
+        Catches jobs whose replica died; any surviving replica can sweep.
+        """
+        cutoff = utcnow() - timedelta(seconds=timeout_seconds)
+        with self.session() as session:
+            session.query(Job).filter(
+                Job.status.in_(JobStatus.ACTIVE), Job.heartbeat_at < cutoff
+            ).update(
+                {
+                    "status": JobStatus.INTERRUPTED,
+                    "message": "The portal restarted while this job was running.",
+                    "updated_at": utcnow(),
+                },
+                synchronize_session=False,
+            )

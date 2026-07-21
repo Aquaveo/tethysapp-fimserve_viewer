@@ -125,7 +125,7 @@ just remember them.
 ### Step 4 - Get this app
 
 ```bash
-git clone https://github.com/tasfia26/tethysapp-fimserve_viewer.git
+git clone https://github.com/Aquaveo/tethysapp-fimserve_viewer.git
 cd tethysapp-fimserve_viewer
 ```
 
@@ -147,6 +147,22 @@ python --version          # 3.10-3.12
 aws --version             # AWS CLI present (needed for HAND download)
 tethys list               # should include fimserve_viewer
 ```
+
+### Step 5.5 - Set up the job database (one time)
+
+Background flood-map jobs are tracked in a small app database so their status
+survives restarts. For development a sqlite file is all you need - no extra
+PostgreSQL setup:
+
+```bash
+tethys services create persistent -n fimserve_sqlite -t sqlite -d ~/fimserve_jobs
+tethys link persistent:fimserve_sqlite fimserve_viewer:ps_database:jobs_db
+tethys syncstores fimserve_viewer
+```
+
+Production portals with multiple servers should assign a PostgreSQL service
+instead (same commands with `-c <db_user>:<db_password>@<host>:5432` in place
+of `-t sqlite -d ...`) so all servers share job state.
 
 ### Step 6 - Start the web server
 
@@ -254,7 +270,7 @@ them. You'll need the password whenever you log into the Tethys admin panel.
 Using **Git Bash** (recommended) OR Miniforge Prompt with git installed:
 
 ```bat
-git clone https://github.com/tasfia26/tethysapp-fimserve_viewer.git
+git clone https://github.com/Aquaveo/tethysapp-fimserve_viewer.git
 cd tethysapp-fimserve_viewer
 ```
 
@@ -271,6 +287,16 @@ tethys install -d
 ```
 
 This is the slow step - 5-15 minutes depending on your internet. Same as on Mac.
+
+### Step 5.5 - Set up the job database (one time)
+
+Same as on Mac - a sqlite-backed store is all development needs:
+
+```bat
+tethys services create persistent -n fimserve_sqlite -t sqlite -d %USERPROFILE%\fimserve_jobs
+tethys link persistent:fimserve_sqlite fimserve_viewer:ps_database:jobs_db
+tethys syncstores fimserve_viewer
+```
 
 ### Step 6 - Start the web server
 

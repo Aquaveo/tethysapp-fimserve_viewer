@@ -14,8 +14,8 @@ from tethys_sdk.routing import controller
 
 from . import pipelines
 from .fim_logic import _parse_generate_flood_json_body
-from .job_store import Job, JobKind
 from .jobs import get_job_manager
+from .model import JobKind
 
 
 def json_body(request: HttpRequest) -> dict:
@@ -29,13 +29,13 @@ def error_response(message: str, status: int = 400) -> JsonResponse:
     return JsonResponse({"status": "error", "message": message}, status=status)
 
 
-def job_payload(job: Job) -> dict:
-    payload = job.to_dict()
+def job_payload(job: dict) -> dict:
+    payload = dict(job)
     payload["job_id"] = payload.pop("id")
     return payload
 
 
-def job_response(job: Job, created: bool) -> JsonResponse:
+def job_response(job: dict, created: bool) -> JsonResponse:
     return JsonResponse(
         {"status": "success", "created": created, "job": job_payload(job)},
         status=202 if created else 200,
