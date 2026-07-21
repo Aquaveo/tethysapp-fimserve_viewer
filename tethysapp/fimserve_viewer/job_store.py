@@ -15,10 +15,37 @@ from .model import Job, JobStatus, utcnow
 
 
 def app_session_maker():
-    """Session factory bound to the app's ``jobs_db`` persistent store."""
+    """Session factory for the jobs database.
+
+    Uses the ``jobs_db`` persistent store when one is assigned (portal
+    deployments); falls back to a local sqlite file for development.
+    """
+    from tethys_apps.exceptions import TethysAppSettingNotAssigned
+
     from .app import App
 
-    return App.get_persistent_store_database("jobs_db", as_sessionmaker=True)
+    try:
+        return App.get_persistent_store_database("jobs_db", as_sessionmaker=True)
+    except TethysAppSettingNotAssigned:
+        return sqlite_session_maker()
+
+
+def sqlite_session_maker():
+    """Session factory for a sqlite jobs database under FIMSERV_ROOT."""
+    from pathlib import Path
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from .fim_logic import _ensure_fimserv_root_env
+    from .model import Base
+
+    database_file = Path(_ensure_fimserv_root_env()) / "jobs.db"
+    engine = create_engine(
+        f"sqlite:///{database_file}", connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
 
 
 class JobStore:

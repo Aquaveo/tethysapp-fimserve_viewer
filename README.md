@@ -148,19 +148,18 @@ aws --version             # AWS CLI present (needed for HAND download)
 tethys list               # should include fimserve_viewer
 ```
 
-### Step 5.5 - Set up the job database (one time)
+### Step 5.5 - (Optional) Job database on PostgreSQL
 
-Background flood-map jobs are tracked in a small app database so their status
-survives restarts (and, on multi-server portals, is shared between servers).
-Create the service, assign it, and build the store:
+Background flood-map jobs are tracked in a small database. With no extra setup
+the app uses a local sqlite file, which is perfect for development - you can
+skip this step entirely. On a production portal with multiple servers, assign
+a PostgreSQL persistent store instead so all servers share job state:
 
 ```bash
 tethys services create persistent -n local_postgis -c <db_user>:<db_password>@localhost:5432
 tethys link persistent:local_postgis fimserve_viewer:ps_database:jobs_db
 tethys syncstores fimserve_viewer
 ```
-
-Use the same PostgreSQL credentials you configured in Step 3.
 
 ### Step 6 - Start the web server
 
@@ -286,16 +285,11 @@ tethys install -d
 
 This is the slow step - 5-15 minutes depending on your internet. Same as on Mac.
 
-### Step 5.5 - Set up the job database (one time)
+### Step 5.5 - (Optional) Job database on PostgreSQL
 
-Same as on Mac - create the persistent store service, assign it to the app,
-and build the store:
-
-```bat
-tethys services create persistent -n local_postgis -c <db_user>:<db_password>@localhost:5432
-tethys link persistent:local_postgis fimserve_viewer:ps_database:jobs_db
-tethys syncstores fimserve_viewer
-```
+Skippable for development: jobs are tracked in a local sqlite file
+automatically. Only production portals need the PostgreSQL store - same
+commands as on Mac.
 
 ### Step 6 - Start the web server
 

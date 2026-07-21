@@ -60,6 +60,7 @@ class Job(Base):
             "key",
             unique=True,
             postgresql_where=text("status IN ('queued', 'step1', 'step2', 'step3')"),
+            sqlite_where=text("status IN ('queued', 'step1', 'step2', 'step3')"),
         ),
     )
 
