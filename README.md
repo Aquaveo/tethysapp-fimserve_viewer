@@ -148,18 +148,21 @@ aws --version             # AWS CLI present (needed for HAND download)
 tethys list               # should include fimserve_viewer
 ```
 
-### Step 5.5 - (Optional) Job database on PostgreSQL
+### Step 5.5 - Set up the job database (one time)
 
-Background flood-map jobs are tracked in a small database. With no extra setup
-the app uses a local sqlite file, which is perfect for development - you can
-skip this step entirely. On a production portal with multiple servers, assign
-a PostgreSQL persistent store instead so all servers share job state:
+Background flood-map jobs are tracked in a small app database so their status
+survives restarts. For development a sqlite file is all you need - no extra
+PostgreSQL setup:
 
 ```bash
-tethys services create persistent -n local_postgis -c <db_user>:<db_password>@localhost:5432
-tethys link persistent:local_postgis fimserve_viewer:ps_database:jobs_db
+tethys services create persistent -n fimserve_sqlite -t sqlite -d ~/fimserve_jobs
+tethys link persistent:fimserve_sqlite fimserve_viewer:ps_database:jobs_db
 tethys syncstores fimserve_viewer
 ```
+
+Production portals with multiple servers should assign a PostgreSQL service
+instead (same commands with `-c <db_user>:<db_password>@<host>:5432` in place
+of `-t sqlite -d ...`) so all servers share job state.
 
 ### Step 6 - Start the web server
 
@@ -285,11 +288,15 @@ tethys install -d
 
 This is the slow step - 5-15 minutes depending on your internet. Same as on Mac.
 
-### Step 5.5 - (Optional) Job database on PostgreSQL
+### Step 5.5 - Set up the job database (one time)
 
-Skippable for development: jobs are tracked in a local sqlite file
-automatically. Only production portals need the PostgreSQL store - same
-commands as on Mac.
+Same as on Mac - a sqlite-backed store is all development needs:
+
+```bat
+tethys services create persistent -n fimserve_sqlite -t sqlite -d %USERPROFILE%\fimserve_jobs
+tethys link persistent:fimserve_sqlite fimserve_viewer:ps_database:jobs_db
+tethys syncstores fimserve_viewer
+```
 
 ### Step 6 - Start the web server
 

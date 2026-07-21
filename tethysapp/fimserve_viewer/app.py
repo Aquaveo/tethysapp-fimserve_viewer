@@ -23,8 +23,8 @@ class App(TethysAppBase):
             PersistentStoreDatabaseSetting(
                 name='jobs_db',
                 description='Background flood-map job records shared across portal replicas. '
-                            'Optional: without it the app tracks jobs in a local sqlite file.',
+                            'Assign a sqlite-type service for development.',
                 initializer='fimserve_viewer.model.init_jobs_db',
-                required=False,
+                required=True,
             ),
         )
