@@ -29,7 +29,13 @@ from tethys_sdk.routing import controller
 
 from . import fim_logic
 from .app import App
-from .results import custom_pattern, nwm_pattern, results, sanitize_discharge
+from .results import (
+    custom_pattern,
+    labels_name_for_tif,
+    nwm_pattern,
+    results,
+    sanitize_discharge,
+)
 
 
 def find_custom_map_key(huc8, discharge_val):
@@ -372,9 +378,15 @@ def flood_map_preview_nwm(request, huc8, date_str):
 @controller(url="api/flood-q-labels/nwm/{huc8}/{date_str}")
 @csrf_exempt
 def flood_q_labels_nwm(request, huc8, date_str):
-    """GeoJSON points with discharge_m3s for each NWM reach (map labels)."""
+    """GeoJSON points with discharge_m3s for each NWM reach (map labels).
+
+    Prefers the labels artifact stored beside the result at generation time
+    (readable from any replica); falls back to computing from local files.
+    """
     try:
-        geojson_str = fim_logic.build_flood_q_labels(huc8, date_str)
+        geojson_str = stored_nwm_labels(huc8, date_str)
+        if geojson_str is None:
+            geojson_str = fim_logic.build_flood_q_labels(huc8, date_str)
         if geojson_str is None:
             return HttpResponse(
                 json.dumps(fim_logic._empty_feature_collection()),
@@ -386,6 +398,14 @@ def flood_q_labels_nwm(request, huc8, date_str):
         return JsonResponse(
             {"status": "error", "message": str(exc)}, status=500
         )
+
+
+def stored_nwm_labels(huc8, date_str):
+    """Return the stored labels GeoJSON for a HUC8 + date, or None."""
+    tif_key = results.find(huc8, nwm_pattern(huc8, date_str))
+    if tif_key is None:
+        return None
+    return results.text(labels_name_for_tif(tif_key))
 
 
 # =============================================================================
