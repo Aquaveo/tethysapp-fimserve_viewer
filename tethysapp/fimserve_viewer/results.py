@@ -13,6 +13,7 @@ from tempfile import NamedTemporaryFile
 from typing import Optional
 
 from django.core.files import File
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import FileResponse
 
@@ -36,6 +37,16 @@ def custom_pattern(huc8: str, discharge_val: float) -> str:
     return f"CustomQ_{sanitize_discharge(discharge_val)}_{huc8}_inundation.tif"
 
 
+def labels_name_for_tif(tif_name: str) -> str:
+    """Streamflow-labels filename co-named with a result tif."""
+    return tif_name.replace("_inundation.tif", "_qlabels.geojson")
+
+
+def nwm_labels_pattern(huc8: str, date_str: str) -> str:
+    """Filename pattern of the stored streamflow-labels GeoJSON."""
+    return labels_name_for_tif(nwm_pattern(huc8, date_str))
+
+
 class ResultStorage:
     """Publishes and retrieves result tifs through default storage."""
 
@@ -55,6 +66,21 @@ class ResultStorage:
             default_storage.save(key, File(handle))
         map_file.unlink()
         return key
+
+    def store_text(self, text: str, huc8: str, filename: str) -> str:
+        """Publish a text artifact (e.g. a labels GeoJSON) and return its key."""
+        key = self.key_for(huc8, filename)
+        if default_storage.exists(key):
+            default_storage.delete(key)
+        default_storage.save(key, ContentFile(text.encode("utf-8")))
+        return key
+
+    def text(self, key: str) -> Optional[str]:
+        """Return a stored text artifact, or None if it is absent."""
+        if not default_storage.exists(key):
+            return None
+        with default_storage.open(key, "rb") as handle:
+            return handle.read().decode("utf-8")
 
     def find(self, huc8: str, pattern: str) -> Optional[str]:
         """Key of the newest stored result matching a filename pattern."""
