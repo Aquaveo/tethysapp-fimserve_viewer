@@ -187,6 +187,12 @@ var FloodMercatorImageLayer = L.Layer.extend({
 
 // Store the GeoJSON layer
 let huc8Layer = null;
+let fimCoveredSet = null;
+
+function isHuc8Covered(properties) {
+    if (!fimCoveredSet) return true;
+    return fimCoveredSet.has(getHUC8(properties));
+}
 // Flood map overlay (TIF preview on map)
 let floodOverlayLayer = null;
 let floodQLabelLayer = null;
@@ -272,6 +278,34 @@ function displayHUC8Details(properties) {
     const cirohLogoUrl = APP_STATIC.cirohLogo || '';
     const tgfLogoUrl = APP_STATIC.tgfLogo || '';
 
+    const covered = isHuc8Covered(properties);
+    const generateSection = covered ? `
+            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; margin-top: 10px;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Date:</label>
+                    <input type="date" id="flood-date-input" value="${defaultDate}" min="${NWM_MIN_DATE}" max="${NWM_MAX_DATE}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" />
+                    <p style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">NWM retrospective data: Feb 1979 &ndash; Jan 2023.</p>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Time (HH:MM:SS):</label>
+                    <input type="time" id="flood-time-input" step="1" value="00:00:00" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" />
+                    <p style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">Model hour for the map. Note: 12:00:00 AM = midnight (00:00).</p>
+                </div>
+                <button id="generate-flood-map-btn" onclick="generateFloodMap('${huc8Code}')" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s;">
+                    Generate Flood Map
+                </button>
+                <button id="download-processed-btn" onclick="downloadProcessedFloodMap('${huc8Code}')" style="width: 100%; padding: 10px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: background 0.2s;">
+                    Download processed (reclassified)
+                </button>
+                <p style="font-size: 11px; color: #7f8c8d; margin-top: 6px;">Reclassifies: flooded &rarr; 1, no flood &rarr; 0.</p>
+                <button id="show-on-map-nwm-btn" onclick="showFloodMapOnMapNwm('${huc8Code}')" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: background 0.2s;">Show on map</button>
+                <div id="flood-map-status" style="margin-top: 10px; font-size: 12px; color: #7f8c8d;"></div>
+            </div>` : `
+            <div style="padding: 15px; background: #fdf0ed; border: 1px solid #f5c6b8; border-radius: 8px; margin-top: 10px;">
+                <strong style="color: #c0392b;">No FIM coverage</strong>
+                <p style="font-size: 12px; color: #7f8c8d; margin-top: 6px;">HAND-FIM data is not available for this HUC8, so a flood map cannot be generated here. Coverage is limited to the CONUS watersheds in the OWP HAND-FIM dataset.</p>
+            </div>`;
+
     content.innerHTML = `
         <div class="huc8-code">${getHUC8(properties)}</div>
         
@@ -309,27 +343,7 @@ function displayHUC8Details(properties) {
         
         <div class="info-section">
             <h3>Generate Flood Map with NWM Data</h3>
-            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; margin-top: 10px;">
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Date:</label>
-                    <input type="date" id="flood-date-input" value="${defaultDate}" min="${NWM_MIN_DATE}" max="${NWM_MAX_DATE}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" />
-                    <p style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">NWM retrospective data: Feb 1979 &ndash; Jan 2023.</p>
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Time (HH:MM:SS):</label>
-                    <input type="time" id="flood-time-input" step="1" value="00:00:00" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" />
-                    <p style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">Model hour for the map. Note: 12:00:00 AM = midnight (00:00).</p>
-                </div>
-                <button id="generate-flood-map-btn" onclick="generateFloodMap('${huc8Code}')" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s;">
-                    Generate Flood Map
-                </button>
-                <button id="download-processed-btn" onclick="downloadProcessedFloodMap('${huc8Code}')" style="width: 100%; padding: 10px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: background 0.2s;">
-                    Download processed (reclassified)
-                </button>
-                <p style="font-size: 11px; color: #7f8c8d; margin-top: 6px;">Reclassifies: flooded → 1, no flood → 0.</p>
-                <button id="show-on-map-nwm-btn" onclick="showFloodMapOnMapNwm('${huc8Code}')" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: background 0.2s;">Show on map</button>
-                <div id="flood-map-status" style="margin-top: 10px; font-size: 12px; color: #7f8c8d;"></div>
-            </div>
+            ${generateSection}
             <div class="sidebar-attribution" aria-label="Partner organizations">
                 <div class="sidebar-attribution-title">Authorization &amp; partners</div>
                 <p class="sidebar-attribution-sub">This application is developed under the authorization of and in partnership with the following organizations.</p>
@@ -343,7 +357,7 @@ function displayHUC8Details(properties) {
             </div>
         </div>
     `;
-    reattachActiveFloodJob(huc8Code);
+    if (covered) reattachActiveFloodJob(huc8Code);
 }
 
 // Function to close sidebar
@@ -379,6 +393,15 @@ function createPopupContent(properties) {
 
 // Function to style HUC8 polygons
 function styleHUC8(feature) {
+    if (!isHuc8Covered(feature.properties)) {
+        return {
+            fillColor: '#95a5a6',
+            fillOpacity: 0.2,
+            color: '#7f8c8d',
+            weight: 1,
+            opacity: 0.4
+        };
+    }
     return {
         fillColor: '#3498db',
         fillOpacity: 0.4,
@@ -486,7 +509,17 @@ function decodeHuc8Topology(topology) {
 }
 
 console.log('Starting to load HUC8 data...');
-fetch(HUC8_TOPOJSON_URL)
+const FIM_COVERAGE_URL = APP_STATIC.fimCoverageUrl || './api/fim-coverage/';
+fetch(FIM_COVERAGE_URL)
+    .then(response => (response.ok ? response.json() : null))
+    .then(coverage => {
+        if (coverage && Array.isArray(coverage.hucs)) {
+            fimCoveredSet = new Set(coverage.hucs.map(String));
+            console.log(`FIM coverage loaded: ${fimCoveredSet.size} HUC8s`);
+        }
+    })
+    .catch(() => console.warn('FIM coverage unavailable; treating all HUC8s as generatable'))
+    .then(() => fetch(HUC8_TOPOJSON_URL))
     .then(response => {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
