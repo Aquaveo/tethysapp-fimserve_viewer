@@ -108,6 +108,13 @@ def all_huc8_topojson(request):
     return bundled_resource_response("all_huc8.topojson", "application/json")
 
 
+@controller(url="api/fim-coverage")
+@csrf_exempt
+def fim_coverage(request):
+    """Serve the set of HUC8s that have HAND-FIM data available."""
+    return bundled_resource_response("fim_coverage.json", "application/json")
+
+
 # =============================================================================
 # /api/health
 # =============================================================================
