@@ -69,6 +69,49 @@ def _patched_setup_directories():
     return code_dir, data_dir, output_dir
 
 
+def _patched_format_datetime64(s):
+    """Coercing replacement for teehr's ``format_datetime64`` pandera parser.
+
+    teehr <= 0.6.x calls ``s.dt.tz_localize(None)`` directly on the datetime
+    columns, which raises ``Can only use .dt accessor with datetimelike
+    values`` when the fetching code hands the parser an all-null
+    ``reference_time`` column: ``da_to_df`` seeds it with ``np.nan`` (float
+    dtype), and pandera runs the parser before it coerces the column's dtype.
+    Every NWM retrospective fetch hits this, so the flood map never generates.
+
+    teehr 0.7.0 fixes it by coercing with ``pd.to_datetime`` first; we cannot
+    upgrade to 0.7.0 because it caps ``pyarrow<23`` against the portal's
+    ``pyarrow>=23.0.1`` security pin (shared with nrds-client), so this is the
+    same coercion applied in place.
+    """
+    import pandas as pd
+
+    if not pd.api.types.is_datetime64_any_dtype(s):
+        s = pd.to_datetime(s, utc=True)
+    s = s.dt.tz_localize(None)
+    return s.astype("datetime64[ms]")
+
+
+def _patch_teehr_datetime_parser():
+    """Replace teehr's datetime64 pandera parser with the coercing backport.
+
+    Sweeps every loaded teehr module that bound ``format_datetime64`` by name,
+    mirroring the ``setup_directories`` sweep below, so the schema builders pick
+    the patched version up whichever namespace they resolve it from. A no-op
+    when teehr is absent or already patched.
+    """
+    import sys as _sys
+
+    for _name, _mod in list(_sys.modules.items()):
+        if (
+            _name.startswith("teehr")
+            and _mod is not None
+            and getattr(_mod, "format_datetime64", None) is not None
+            and _mod.format_datetime64 is not _patched_format_datetime64
+        ):
+            _mod.format_datetime64 = _patched_format_datetime64
+
+
 def _load_fimserve():
     """Import FIMserv submodules on demand.
 
@@ -120,6 +163,10 @@ def _load_fimserve():
             and getattr(_mod, "setup_directories", None) is not None
         ):
             _mod.setup_directories = _patched_setup_directories
+
+    # nwmretrospective imports teehr at module load, so teehr is in sys.modules
+    # by now; patch its datetime64 parser before any fetch validates a frame.
+    _patch_teehr_datetime_parser()
 
     return {
         "DownloadHUC8": DownloadHUC8,
