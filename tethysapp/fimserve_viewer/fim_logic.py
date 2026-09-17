@@ -69,6 +69,49 @@ def _patched_setup_directories():
     return code_dir, data_dir, output_dir
 
 
+def _patched_format_datetime64(s):
+    """Coercing replacement for teehr's ``format_datetime64`` pandera parser.
+
+    teehr <= 0.6.x calls ``s.dt.tz_localize(None)`` directly on the datetime
+    columns, which raises ``Can only use .dt accessor with datetimelike
+    values`` when the fetching code hands the parser an all-null
+    ``reference_time`` column: ``da_to_df`` seeds it with ``np.nan`` (float
+    dtype), and pandera runs the parser before it coerces the column's dtype.
+    Every NWM retrospective fetch hits this, so the flood map never generates.
+
+    teehr 0.7.0 fixes it by coercing with ``pd.to_datetime`` first; we cannot
+    upgrade to 0.7.0 because it caps ``pyarrow<23`` against the portal's
+    ``pyarrow>=23.0.1`` security pin (shared with nrds-client), so this is the
+    same coercion applied in place.
+    """
+    import pandas as pd
+
+    if not pd.api.types.is_datetime64_any_dtype(s):
+        s = pd.to_datetime(s, utc=True)
+    s = s.dt.tz_localize(None)
+    return s.astype("datetime64[ms]")
+
+
+def _patch_teehr_datetime_parser():
+    """Replace teehr's datetime64 pandera parser with the coercing backport.
+
+    Sweeps every loaded teehr module that bound ``format_datetime64`` by name,
+    mirroring the ``setup_directories`` sweep below, so the schema builders pick
+    the patched version up whichever namespace they resolve it from. A no-op
+    when teehr is absent or already patched.
+    """
+    import sys as _sys
+
+    for _name, _mod in list(_sys.modules.items()):
+        if (
+            _name.startswith("teehr")
+            and _mod is not None
+            and getattr(_mod, "format_datetime64", None) is not None
+            and _mod.format_datetime64 is not _patched_format_datetime64
+        ):
+            _mod.format_datetime64 = _patched_format_datetime64
+
+
 def _load_fimserve():
     """Import FIMserv submodules on demand.
 
@@ -120,6 +163,10 @@ def _load_fimserve():
             and getattr(_mod, "setup_directories", None) is not None
         ):
             _mod.setup_directories = _patched_setup_directories
+
+    # nwmretrospective imports teehr at module load, so teehr is in sys.modules
+    # by now; patch its datetime64 parser before any fetch validates a frame.
+    _patch_teehr_datetime_parser()
 
     return {
         "DownloadHUC8": DownloadHUC8,
@@ -869,6 +916,52 @@ def _tif_to_preview_png(tif_path, huc8=None):
     }
 
 
+def build_preview_payload(tif_path, huc8=None) -> dict:
+    """Preview image plus placement for one result tif, shaped for JSON.
+
+    Single source of truth for the preview response so the generation
+    pipeline and the view endpoint cannot drift apart.
+    """
+    out = _tif_to_preview_png(tif_path, huc8=huc8)
+    return {
+        "image": f"data:image/png;base64,{out['png_b64']}",
+        "bounds": out["bounds"],
+        "mercator": out["mercator"],
+    }
+
+
+def to_cog(tif_path) -> Path:
+    """Rewrite a GeoTIFF in place as a valid Cloud Optimized GeoTIFF.
+
+    Keeps the source CRS and pixel values and adds the internal overview
+    pyramid a COG requires, so the stored raster can be opened over HTTP by
+    QGIS/ArcGIS without downloading it whole. Overviews resample with
+    nearest because the raster is categorical - averaging flooded and dry
+    pixels would invent values belonging to neither class.
+
+    The rewrite goes to a sibling temp file and is swapped in atomically, so
+    a failure leaves the original untouched.
+    """
+    import rasterio.shutil as rio_shutil
+
+    tif_path = Path(tif_path)
+    staged = tif_path.with_name(tif_path.name + ".cog.tmp")
+    try:
+        rio_shutil.copy(
+            str(tif_path),
+            str(staged),
+            driver="COG",
+            COMPRESS="LZW",
+            BLOCKSIZE=256,
+            OVERVIEW_RESAMPLING="NEAREST",
+            BIGTIFF="IF_SAFER",
+        )
+        os.replace(staged, tif_path)
+    finally:
+        staged.unlink(missing_ok=True)
+    return tif_path
+
+
 # ---------------------------------------------------------------------------
 # GeoJSON helpers.
 # ---------------------------------------------------------------------------
@@ -1192,6 +1285,8 @@ __all__ = [
     "DEFAULT_RECLASS_TABLE",
     "_get_huc8_boundary_for_mask",
     "_tif_to_preview_png",
+    "build_preview_payload",
+    "to_cog",
     "_empty_feature_collection",
     "build_flood_q_labels",
     "run_custom_discharge_flood_map",
