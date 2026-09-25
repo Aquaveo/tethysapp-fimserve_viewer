@@ -14,10 +14,14 @@ def _scheduler():
     failure to look it up is logged so a broken production scheduler is visible
     rather than silently degrading to in-process execution.
     """
+    from tethys_apps.exceptions import TethysAppSettingNotAssigned
+
     from .app import App, DASK_SCHEDULER_NAME
 
     try:
         return App.get_scheduler(DASK_SCHEDULER_NAME)
+    except TethysAppSettingNotAssigned:
+        return None
     except Exception:
         log.warning(
             "Dask scheduler '%s' could not be resolved; running generation in-process.",

@@ -1,5 +1,6 @@
 """Choose where a job runs: a local thread for development, a Dask worker in production."""
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Protocol
 
@@ -39,6 +40,7 @@ class DaskSubmitter:
 
 
 _thread_submitter: Optional[ThreadSubmitter] = None
+_thread_submitter_lock = threading.Lock()
 
 
 def get_submitter() -> JobSubmitter:
@@ -48,5 +50,7 @@ def get_submitter() -> JobSubmitter:
         return DaskSubmitter(client)
     global _thread_submitter
     if _thread_submitter is None:
-        _thread_submitter = ThreadSubmitter()
+        with _thread_submitter_lock:
+            if _thread_submitter is None:
+                _thread_submitter = ThreadSubmitter()
     return _thread_submitter

@@ -74,12 +74,24 @@ class JobStore:
             return claimed == 1
 
     def update_progress(self, job_id: str, status: str, message: str = "") -> None:
-        """Record a status transition reported by the running pipeline."""
-        self.update_fields(job_id, status=status, message=message, heartbeat_at=utcnow())
+        """Record a status transition, only while the job is still active."""
+        self._update_active(job_id, status=status, message=message, heartbeat_at=utcnow())
 
     def finish(self, job_id: str, status: str, message: str, result_file: str = "") -> None:
-        """Record the terminal state of a job."""
-        self.update_fields(job_id, status=status, message=message, result_file=result_file)
+        """Record a job's terminal state, only from an active state.
+
+        Guarding on the active statuses stops a late worker write from
+        overwriting a job the stale sweep already interrupted, and a second
+        writer from clobbering an already terminal row.
+        """
+        self._update_active(job_id, status=status, message=message, result_file=result_file)
+
+    def fail_if_unclaimed(self, job_id: str, message: str) -> None:
+        """Mark a still-queued, unclaimed job as errored; a no-op once a worker claimed it."""
+        with self.session() as session:
+            session.query(Job).filter(
+                Job.id == job_id, Job.status == JobStatus.QUEUED, Job.claimed_by == ""
+            ).update({"status": JobStatus.ERROR, "message": message, "updated_at": utcnow()})
 
     def touch_owned(self, owner: str) -> None:
         """Refresh the heartbeat of every active job owned by this replica."""
@@ -88,11 +100,13 @@ class JobStore:
                 Job.status.in_(JobStatus.ACTIVE), Job.claimed_by == owner
             ).update({"heartbeat_at": utcnow()}, synchronize_session=False)
 
-    def update_fields(self, job_id: str, **fields) -> None:
-        """Apply column updates to one job, stamping ``updated_at``."""
+    def _update_active(self, job_id: str, **fields) -> None:
+        """Apply column updates to one job only while it is active, stamping ``updated_at``."""
         fields["updated_at"] = utcnow()
         with self.session() as session:
-            session.query(Job).filter(Job.id == job_id).update(fields)
+            session.query(Job).filter(
+                Job.id == job_id, Job.status.in_(JobStatus.ACTIVE)
+            ).update(fields)
 
     def get(self, job_id: str) -> Optional[dict]:
         """Return one job as a dict, or None."""
