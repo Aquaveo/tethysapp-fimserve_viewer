@@ -1,0 +1,6 @@
+dependencies:
+- name: tethys-app
+  repository: oci://ghcr.io/aquaveo/charts
+  version: 0.1.5
+digest: sha256:185c2c4e8071a2dea316229f857c8dc5895c2cd78ef3f802c7f65550e64d45c1
+generated: "2026-09-19T18:10:17.525036407-06:00"

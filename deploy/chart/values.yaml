@@ -54,7 +54,7 @@ tethys-app:
 dask:
   enabled: true
   serviceAccountName: fimserve-dask
-  binary: dask
+  binary: ${VIRTUAL_ENV:-/opt/conda/envs/tethys}/bin/dask
   image:
     repository: ''
     tag: ''
