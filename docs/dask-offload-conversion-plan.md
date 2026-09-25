@@ -81,14 +81,23 @@ Worker safe, no web pod state. Each function has one purpose.
   configured, otherwise a `ThreadSubmitter`. This is the single switch that
   keeps development working with no Dask.
 
-### `scheduler.py` (new): Dask connection and adaptive scaling
+### `scheduler.py` (new): Dask connection
 
 - `dask_client()`: return a cached `distributed.Client` for the app's
-  `dask_primary` scheduler, or `None` when none is configured. In production the
-  scheduler runs adaptive worker scaling (see deploy), so the client only
-  submits; it does not manage workers.
-- `dask_available()`: whether a Dask scheduler is configured. Used by
-  `get_submitter`.
+  `dask_primary` scheduler, or `None` when none is configured. The scheduler is a
+  Tethys `DaskScheduler` whose host is the operator's scheduler Service (see
+  deploy), so the app only connects and submits; the operator's autoscaler owns
+  worker lifecycle. An unassigned setting returns `None` quietly (development); a
+  lookup failure is logged so a broken production scheduler is visible rather
+  than silently degrading to in-process execution.
+
+### `dask_worker.py` (new): bootstrap Django on a worker
+
+A bare `dask worker` does not run the image entrypoint, so Django is never
+configured and the ORM (`jobs_db`) and `default_storage` (S3 COGs) are
+unreachable. `dask_setup(worker)` runs once per worker process via Dask
+`--preload` and calls `django.setup()`. fimeval needs no equivalent because its
+tasks write straight to S3 and never touch the Tethys ORM; fimserve's do.
 
 ### `jobs.py` (reduced): submission orchestration only
 
@@ -110,33 +119,40 @@ the app still loads in development with no scheduler assigned (then
 
 ## Deploy changes: adaptive Dask tier
 
-Two ways to get workers that scale to zero. Both keep the web pod small; they
-differ in how workers are created and torn down.
+The dask-kubernetes operator is installed on the portal cluster, and fimeval
+already runs this exact pattern (a `DaskCluster` plus a `DaskAutoscaler` at
+`minimum=0`), so fimserve clones it. Native Dask adaptive scaling owns worker
+lifecycle; there is no external queue metric and no KEDA.
 
-### Recommended: KEDA scaled worker Deployment on a static scheduler
+Two operator custom resources, added to the portal chart as
+`charts/ciroh/templates/dask.yaml` (gated on `.Values.dask.enabled`):
 
-Reuses the portal's existing KEDA and fimeval's static Dask scheduler pattern,
-adds no cluster operator.
+- **`DaskCluster` `cirohportal-prod-dask`**: a small always on **scheduler** pod
+  (about 1 Gi) plus a **worker** template that starts at `replicas: 0`. The
+  worker runs the **portal image** (fimserve, teehr, gdal, and FIMserv are
+  already present), 8 to 12 Gi, with an ephemeral `/scratch` volume used for
+  `FIMSERV_ROOT` (LRU bounded by `manage_cache.py`), on spot nodes.
+- **`DaskAutoscaler`** targeting that cluster with `minimum: 0, maximum: N`. The
+  operator watches scheduler load and adds a worker when a job is submitted,
+  then scales back to zero when idle.
 
-- A small Dask **scheduler** Deployment plus Service (the `dask_primary`
-  scheduler the app connects to).
-- A Dask **worker** Deployment (8 to 12 Gi, ephemeral `FIMSERV_ROOT` volume,
-  the fimserve image with a worker command) fronted by a KEDA `ScaledObject`
-  with `minReplicaCount: 0`. The trigger is the count of queued or running rows
-  in `jobs_db` (KEDA postgresql scaler), so a worker appears when a job is
-  queued and the tier returns to zero when the queue drains.
-- Web Deployment resources drop to about 256 Mi request, 1 Gi limit.
+The worker reuses the web pod's env (`ciroh.tethysEnv`) and mounts the same
+`portal_config.yml` ConfigMap, then runs:
 
-### Alternative: Dask native adaptive via the dask-kubernetes operator
+```
+dask worker tcp://cirohportal-prod-dask-scheduler.cirohportal.svc:8786 \
+  --nworkers 1 --nthreads 1 --memory-limit 8GiB --local-directory /scratch \
+  --preload tethysapp.fimserve_viewer.dask_worker
+```
 
-`KubeCluster(...).adapt(minimum=0, maximum=N)` lets the Dask scheduler create and
-delete worker pods itself. This is Dask's own adaptive scaling and needs no
-external queue metric, but it requires installing the dask-kubernetes operator
-and granting the app service account RBAC to manage `DaskCluster` resources.
-Prefer this only if adding the operator is acceptable.
+`--nthreads 1` keeps one generation per worker (the pipeline is single threaded
+and memory heavy); `--preload` bootstraps Django before the first task.
 
-Either way the fimserve image is reused for the worker (same code, worker
-command), so teehr, gdal, and FIMserv are already present.
+The app connects through a Tethys `DaskScheduler` named `dask_primary` whose host
+is that scheduler Service, created once with a non zero timeout
+(`tethys schedulers create-dask ... -t 60`; timeout 0 hits a `parse_timedelta`
+bug) and assigned to the app's scheduler setting. Web Deployment resources drop
+to about 256 Mi request, 1 Gi limit.
 
 ## Local development
 
@@ -152,8 +168,9 @@ command), so teehr, gdal, and FIMserv are already present.
 
 1. Land the app code with the thread path as default; behavior is identical with
    no scheduler, so it is safe to merge before any Dask infra exists.
-2. Deploy the scheduler plus KEDA scaled worker; assign the `dask_primary`
-   scheduler to the app setting.
+2. Deploy the `DaskCluster` plus `DaskAutoscaler` (operator); create the
+   `dask_primary` Tethys `DaskScheduler` at the scheduler Service and assign it
+   to the app setting.
 3. Drop the web Deployment resources.
 4. Verify: submit a generation, watch a worker scale up, the COG land in S3, the
    job row finish, and the worker scale back to zero; confirm the web pod stays
