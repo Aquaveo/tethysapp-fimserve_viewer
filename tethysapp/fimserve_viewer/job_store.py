@@ -40,15 +40,16 @@ class JobStore:
         finally:
             session.close()
 
-    def create_or_get_active(self, kind: str, huc8: str, key: str, params: dict, owner: str) -> Tuple[dict, bool]:
-        """Insert a queued job owned by this replica, or return the active duplicate.
+    def create_or_get_active(self, kind: str, huc8: str, key: str, params: dict) -> Tuple[dict, bool]:
+        """Insert a queued, unclaimed job, or return the active duplicate.
 
         The partial unique index on active keys makes this race-safe across
-        replicas: the losing inserter adopts the winner's job.
+        replicas: the losing inserter adopts the winner's job. The executor that
+        runs the job claims it afterwards with :meth:`claim`.
         """
         try:
             with self.session() as session:
-                job = Job(key=key, kind=kind, huc8=huc8, params=params, claimed_by=owner)
+                job = Job(key=key, kind=kind, huc8=huc8, params=params)
                 session.add(job)
                 session.flush()
                 return job.to_dict(), True
@@ -59,12 +60,16 @@ class JobStore:
             return existing, False
 
     def claim(self, job_id: str, worker: str) -> bool:
-        """Confirm a queued job is still this worker's to run; False otherwise."""
+        """Assign a queued, unclaimed job to this worker; False if already taken."""
         with self.session() as session:
             claimed = (
                 session.query(Job)
-                .filter(Job.id == job_id, Job.status == JobStatus.QUEUED, Job.claimed_by == worker)
-                .update({"heartbeat_at": utcnow(), "updated_at": utcnow()})
+                .filter(
+                    Job.id == job_id,
+                    Job.status == JobStatus.QUEUED,
+                    Job.claimed_by.in_(["", worker]),
+                )
+                .update({"claimed_by": worker, "heartbeat_at": utcnow(), "updated_at": utcnow()})
             )
             return claimed == 1
 

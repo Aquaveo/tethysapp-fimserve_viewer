@@ -32,6 +32,8 @@ dependencies = [
     # FIMserv, pinned. Bump the ref here to upgrade.
     "fimserve @ git+https://github.com/sdmlua/FIMserv.git@83b278931cea5a04e437bf5f2fde947b5904c7b6",
 
+    "dask[distributed]",
+
     # Imported directly by the viewer (fim_logic.py / controllers.py).
     "geopandas",
     "rasterio",

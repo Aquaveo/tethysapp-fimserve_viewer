@@ -14,7 +14,7 @@ from tethys_sdk.routing import controller
 
 from . import pipelines
 from .fim_logic import _parse_generate_flood_json_body
-from .jobs import get_job_manager
+from .jobs import active_for_huc, get_job, submit_job
 from .model import JobKind
 
 
@@ -73,7 +73,7 @@ def submit_nwm_job(request):
         huc8, datetime_str = _parse_generate_flood_json_body(json_body(request))
     except ValueError as exc:
         return error_response(str(exc))
-    job, created = get_job_manager().submit(
+    job, created = submit_job(
         kind=JobKind.NWM,
         huc8=huc8,
         key=pipelines.nwm_job_key(huc8, datetime_str),
@@ -94,7 +94,7 @@ def submit_custom_job(request):
         huc8, discharge = parse_custom_discharge_body(json_body(request))
     except ValueError as exc:
         return error_response(str(exc))
-    job, created = get_job_manager().submit(
+    job, created = submit_job(
         kind=JobKind.CUSTOM,
         huc8=huc8,
         key=pipelines.custom_job_key(huc8, discharge),
@@ -111,7 +111,7 @@ def active_job(request):
     huc8 = request.GET.get("huc8")
     if not huc8:
         return error_response("Missing huc8 query parameter")
-    job = get_job_manager().active_for_huc(huc8)
+    job = active_for_huc(huc8)
     return JsonResponse({"status": "success", "job": job_payload(job) if job else None})
 
 
@@ -119,7 +119,7 @@ def active_job(request):
 @csrf_exempt
 def job_status(request, job_id):
     """Return the current state of one job."""
-    job = get_job_manager().get(job_id)
+    job = get_job(job_id)
     if job is None:
         return error_response(f"No job found with id {job_id}", status=404)
     return JsonResponse({"status": "success", "job": job_payload(job)})

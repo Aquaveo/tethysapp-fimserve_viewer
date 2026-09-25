@@ -1,5 +1,7 @@
-from tethys_sdk.app_settings import PersistentStoreDatabaseSetting
+from tethys_sdk.app_settings import PersistentStoreDatabaseSetting, SchedulerSetting
 from tethys_sdk.base import TethysAppBase
+
+DASK_SCHEDULER_NAME = 'dask_primary'
 
 
 class App(TethysAppBase):
@@ -26,5 +28,17 @@ class App(TethysAppBase):
                             'Assign a sqlite-type service for development.',
                 initializer='fimserve_viewer.model.init_jobs_db',
                 required=True,
+            ),
+        )
+
+    def scheduler_settings(self):
+        """Declare the Dask scheduler used to offload flood-map generation."""
+        return (
+            SchedulerSetting(
+                name=DASK_SCHEDULER_NAME,
+                description='Dask scheduler that runs flood-map generation off the web pods. '
+                            'Leave unassigned in development to run jobs in-process.',
+                engine=SchedulerSetting.DASK,
+                required=False,
             ),
         )

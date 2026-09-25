@@ -1,95 +1,45 @@
-"""Background job manager for flood-map generation.
+"""Submit flood-map generation jobs and read their status.
 
-Runs one generation at a time in a worker thread. Deduplication and job
-ownership are enforced in the database, and a replica-wide heartbeat covers
-every job this replica owns (queued or running), so any number of portal
-replicas can run a manager safely.
+Deduplication and ownership live in the jobs_db persistent store. A submitter
+decides where a job runs: a Dask worker when a scheduler is configured,
+otherwise a local thread. Execution itself lives in :mod:`execution`.
 """
 
-import os
-import socket
-import threading
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
-from .job_store import JobStore
+from .execution import JobRunner, process_store
 from .model import JobStatus
+from .submitters import get_submitter
 
-JobRunner = Callable[[dict, Callable[[str, str], None]], str]
-
-HEARTBEAT_SECONDS = 30
 STALE_TIMEOUT_SECONDS = 180
 
 
-def worker_identity() -> str:
-    """Identity of this replica and process, recorded on owned jobs."""
-    return f"{socket.gethostname()}:{os.getpid()}"
+def submit_job(kind: str, huc8: str, key: str, params: dict, runner: JobRunner) -> Tuple[dict, bool]:
+    """Queue a job, or return the active job that already has the same key.
 
-
-class JobManager:
-    """Submits, executes, and tracks background generation jobs."""
-
-    def __init__(self, store: Optional[JobStore] = None, max_workers: int = 1):
-        self.store = store or JobStore()
-        self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="fimjob")
-        self.heartbeat_thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
-        self.heartbeat_thread.start()
-
-    def heartbeat_loop(self) -> None:
-        """Refresh heartbeats for this replica's active jobs, forever."""
-        ticker = threading.Event()
-        while not ticker.wait(HEARTBEAT_SECONDS):
-            with suppress(Exception):
-                self.store.touch_owned(worker_identity())
-
-    def submit(self, kind: str, huc8: str, key: str, params: dict, runner: JobRunner) -> Tuple[dict, bool]:
-        """Queue a job, or return the already-active job with the same key.
-
-        Returns ``(job, created)`` where ``created`` is False when an active
-        duplicate was found.
-        """
-        self.store.mark_stale_interrupted(STALE_TIMEOUT_SECONDS)
-        job, created = self.store.create_or_get_active(
-            kind=kind, huc8=huc8, key=key, params=params, owner=worker_identity()
-        )
-        if created:
-            self.executor.submit(self.execute, job["id"], runner)
-        return job, created
-
-    def execute(self, job_id: str, runner: JobRunner) -> None:
-        """Run one owned job to completion, recording progress and outcome."""
-        if not self.store.claim(job_id, worker_identity()):
-            return
-        job = self.store.get(job_id)
-        if job is None:
-            return
-
-        def progress(status: str, message: str = "") -> None:
-            self.store.update_progress(job_id, status, message)
-
+    Returns ``(job, created)``; ``created`` is False when an active duplicate
+    was found. A dispatch failure marks the new job errored before raising, so
+    it never lingers as a phantom queued row.
+    """
+    store = process_store()
+    store.mark_stale_interrupted(STALE_TIMEOUT_SECONDS)
+    job, created = store.create_or_get_active(kind=kind, huc8=huc8, key=key, params=params)
+    if created:
         try:
-            result_file = runner(job, progress)
-            self.store.finish(job_id, JobStatus.SUCCESS, "Flood map generated successfully.", result_file)
+            get_submitter().submit(job["id"], runner)
         except Exception as exc:
-            self.store.finish(job_id, JobStatus.ERROR, str(exc))
-
-    def get(self, job_id: str) -> Optional[dict]:
-        return self.store.get(job_id)
-
-    def active_for_huc(self, huc8: str) -> Optional[dict]:
-        self.store.mark_stale_interrupted(STALE_TIMEOUT_SECONDS)
-        return self.store.find_active_for_huc(huc8)
+            store.finish(job["id"], JobStatus.ERROR, f"Could not start generation: {exc}")
+            raise
+    return job, created
 
 
-manager_instance: Optional[JobManager] = None
-manager_lock = threading.Lock()
+def active_for_huc(huc8: str) -> Optional[dict]:
+    """Return the active job for a HUC8, or None."""
+    store = process_store()
+    store.mark_stale_interrupted(STALE_TIMEOUT_SECONDS)
+    return store.find_active_for_huc(huc8)
 
 
-def get_job_manager() -> JobManager:
-    """Return the process-wide :class:`JobManager`, creating it on first use."""
-    global manager_instance
-    with manager_lock:
-        if manager_instance is None:
-            manager_instance = JobManager()
-        return manager_instance
+def get_job(job_id: str) -> Optional[dict]:
+    """Return one job by id, or None."""
+    return process_store().get(job_id)
