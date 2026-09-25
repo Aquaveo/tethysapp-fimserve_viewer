@@ -1,0 +1,7 @@
+.git
+.github
+deploy/chart/charts
+deploy/chart/Chart.lock
+**/__pycache__
+**/*.pyc
+*.egg-info
