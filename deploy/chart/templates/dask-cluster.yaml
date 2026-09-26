@@ -67,6 +67,8 @@ spec:
                 --preload tethysapp.fimserve_viewer.dask_worker
           env:
             {{- include "tethys-app.env" $ctx | nindent 12 }}
+            - name: DJANGO_ALLOW_ASYNC_UNSAFE
+              value: "true"
           volumeMounts:
             - name: portal-config
               mountPath: /config
