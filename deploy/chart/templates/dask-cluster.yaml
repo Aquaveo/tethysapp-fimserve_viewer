@@ -58,6 +58,8 @@ spec:
           command: ["/bin/bash", "-lc"]
           args:
             - |
+              export PATH="${VIRTUAL_ENV:-/opt/conda/envs/tethys}/bin:$PATH"
+              /usr/local/bin/portal-config.sh
               export FIMSERV_ROOT={{ .Values.dask.worker.fimservRoot | quote }}
               mkdir -p "$FIMSERV_ROOT"
               exec {{ .Values.dask.binary }} worker {{ include "fimserve.daskSchedulerAddress" . | quote }} \
