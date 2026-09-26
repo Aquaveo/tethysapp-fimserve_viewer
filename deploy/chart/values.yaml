@@ -71,5 +71,9 @@ dask:
       requests: { cpu: '2', memory: 8Gi, ephemeral-storage: 20Gi }
       limits: { memory: 12Gi, ephemeral-storage: 40Gi }
   autoscaler:
-    minimum: 0
+    # minimum 1, not 0: the operator's autoscaler misjudges a single long-running
+    # fire-and-forget job as idle and retires the worker every ~60s (killing the
+    # job mid-run). Pinning one worker keeps jobs reliable; it still scales up to
+    # maximum under load. True scale-to-zero needs the retire behavior fixed first.
+    minimum: 1
     maximum: 3
