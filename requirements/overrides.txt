@@ -4,6 +4,12 @@
 
 numpy==1.26.4
 
+# scipy 1.18+ requires numpy>=2.0 and uses np.long (absent in numpy 1.26) -> fimserve
+# import crashes. The standalone image has only fimserve to constrain scipy, so it
+# floats to the latest without this cap; 1.17.x is the numpy-1.26-compatible line the
+# portal image runs.
+scipy<1.18
+
 zarr>=3,<3.1
 
 # Security pins - bump transitive deps off versions flagged High by the Grype

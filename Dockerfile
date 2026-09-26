@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/cache/uv \
     && uv pip uninstall nodejs-bin \
     && uv pip install --overrides ${TETHYS_HOME}/overrides.txt "gdal==$(gdal-config --version)" \
     && /opt/conda/envs/tethys/bin/python -c "import storages, boto3, dask.distributed" \
+    && /opt/conda/envs/tethys/bin/python -c "import fimserve.datadownload, fimserve.runFIM" \
     && /opt/conda/envs/tethys/bin/python -c "import tethysapp.fimserve_viewer.dask_worker"
 
 FROM ${UVX_RUNTIME}
