@@ -66,6 +66,7 @@ spec:
                 --nworkers 1 --nthreads {{ .Values.dask.worker.nthreads }} \
                 --memory-limit {{ .Values.dask.worker.memoryLimit }} \
                 --local-directory /scratch \
+                --no-dashboard \
                 --preload tethysapp.fimserve_viewer.dask_worker
           env:
             {{- include "tethys-app.env" $ctx | nindent 12 }}
